@@ -21,6 +21,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
+          # Prefer pinning to the version in package.json; change if you intentionally want latest
           bun-version: 1.3.14
 
       - name: Setup Node.js
@@ -35,7 +36,7 @@ jobs:
           bun -v
           npm -v
 
-      - name: Cache Bun and dependencies
+      - name: Restore caches (if any)
         uses: actions/cache@v4
         with:
           path: |
@@ -47,10 +48,11 @@ jobs:
             ${{ runner.os }}-bun-
             ${{ runner.os }}-
 
-      - name: Install dependencies (skip scripts)
+      - name: Install dependencies (skip package scripts)
         shell: bash
         run: |
-          # Install but do not run package postinstall hooks yet
+          # Install dependencies but do not run package postinstall hooks yet.
+          # This prevents Bun from executing the repo postinstall automatically.
           bun install --frozen-lockfile --ignore-scripts
 
       - name: Remove Bun symlink cache (prevent Node EPERM)
@@ -63,7 +65,7 @@ jobs:
             echo "No node_modules/.bun present"
           fi
 
-      - name: Run postinstall fixes and apply patches
+      - name: Run postinstall fixes and apply patches (safe order)
         shell: bash
         run: |
           set -euo pipefail
@@ -79,7 +81,7 @@ jobs:
           fi
           echo "Detected postinstall script: $SCRIPT"
 
-          # Run the script with bun if available (avoids Node resolver issues)
+          # Run the script with bun if available (bun avoids Node's realpath into .bun)
           if command -v bun >/dev/null 2>&1; then
             echo "Running postinstall script with bun"
             bun "$SCRIPT"
@@ -145,7 +147,7 @@ jobs:
         working-directory: packages/electron
         shell: bash
         run: |
-          # ensure no .bun before invoking node-based rebuild
+          # safety: remove any .bun in repo root before invoking node-based rebuild
           if [ -d ../../node_modules/.bun ]; then
             rm -rf ../../node_modules/.bun || true
           fi
@@ -155,7 +157,7 @@ jobs:
         working-directory: packages/electron
         shell: bash
         run: |
-          # ensure no .bun before packaging
+          # safety: ensure no .bun before packaging
           if [ -d ../../node_modules/.bun ]; then
             rm -rf ../../node_modules/.bun || true
           fi
