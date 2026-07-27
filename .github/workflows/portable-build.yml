@@ -21,7 +21,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.14
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -47,9 +47,66 @@ jobs:
             ${{ runner.os }}-bun-
             ${{ runner.os }}-
 
-      - name: Install dependencies (frozen)
-        run: bun install --frozen-lockfile
+      - name: Install dependencies (skip scripts)
         shell: bash
+        run: |
+          # Install but do not run package postinstall hooks yet
+          bun install --frozen-lockfile --ignore-scripts
+
+      - name: Remove Bun symlink cache (prevent Node EPERM)
+        shell: bash
+        run: |
+          if [ -d node_modules/.bun ]; then
+            echo "Removing node_modules/.bun to avoid EPERM on Windows"
+            rm -rf node_modules/.bun
+          else
+            echo "No node_modules/.bun present"
+          fi
+
+      - name: Run postinstall fixes and apply patches
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # detect script path
+          if [ -f ./fix-deprecation.js ]; then
+            SCRIPT=./fix-deprecation.js
+          elif [ -f ./scripts/fix-deprecation.js ]; then
+            SCRIPT=./scripts/fix-deprecation.js
+          else
+            echo "ERROR: fix-deprecation.js not found at ./fix-deprecation.js or ./scripts/fix-deprecation.js" >&2
+            exit 1
+          fi
+          echo "Detected postinstall script: $SCRIPT"
+
+          # Run the script with bun if available (avoids Node resolver issues)
+          if command -v bun >/dev/null 2>&1; then
+            echo "Running postinstall script with bun"
+            bun "$SCRIPT"
+          else
+            echo "Running postinstall script with node"
+            node "$SCRIPT"
+          fi
+
+          # Apply patch-package non-interactively; prefer bunx/bun if available
+          if command -v bunx >/dev/null 2>&1; then
+            echo "Applying patch-package with bunx"
+            bunx patch-package
+          elif command -v bun >/dev/null 2>&1; then
+            echo "Applying patch-package with bun (fallback to npx if needed)"
+            bun run patch-package || npx --yes patch-package
+          else
+            echo "Applying patch-package with npx"
+            npx --yes patch-package
+          fi
+
+      - name: Ensure no Bun symlink cache remains (pre-build safety)
+        shell: bash
+        run: |
+          if [ -d node_modules/.bun ]; then
+            echo "Removing leftover node_modules/.bun"
+            rm -rf node_modules/.bun
+          fi
 
       - name: Get bundled OpenCode CLI version
         id: opencode_cli_version
@@ -87,12 +144,21 @@ jobs:
       - name: Rebuild native modules
         working-directory: packages/electron
         shell: bash
-        run: node ./scripts/rebuild-native.mjs
+        run: |
+          # ensure no .bun before invoking node-based rebuild
+          if [ -d ../../node_modules/.bun ]; then
+            rm -rf ../../node_modules/.bun || true
+          fi
+          node ./scripts/rebuild-native.mjs
 
       - name: Build portable app (unpacked dir)
         working-directory: packages/electron
         shell: bash
         run: |
+          # ensure no .bun before packaging
+          if [ -d ../../node_modules/.bun ]; then
+            rm -rf ../../node_modules/.bun || true
+          fi
           node ./scripts/package.mjs --dir --${{ env.PLATFORM }} --${{ env.ARCH }} --publish=never
           bun run verify:opencode-cli:packaged
 
