@@ -1,0 +1,114 @@
+name: Portable Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-portable:
+    name: Build Windows Portable x64
+    runs-on: windows-2022
+    env:
+      APP_NAME: OpenChamber
+      ARCH: x64
+      PLATFORM: win
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+
+      - name: Show runtime versions
+        shell: bash
+        run: |
+          node -v
+          bun -v
+          npm -v
+
+      - name: Cache Bun and dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun
+            **/node_modules
+            packages/electron/.cache/opencode-cli
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb') }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+            ${{ runner.os }}-
+
+      - name: Install dependencies (frozen)
+        run: bun install --frozen-lockfile
+        shell: bash
+
+      - name: Get bundled OpenCode CLI version
+        id: opencode_cli_version
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').dependencies['@opencode-ai/sdk']")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Cache packaged OpenCode CLI
+        uses: actions/cache@v4
+        with:
+          path: packages/electron/.cache/opencode-cli
+          key: opencode-cli-${{ runner.os }}-x64-${{ steps.opencode_cli_version.outputs.version }}
+          restore-keys: |
+            opencode-cli-${{ runner.os }}-x64-
+            opencode-cli-${{ runner.os }}-
+
+      - name: Build web assets
+        working-directory: packages/electron
+        run: bun run build:web-assets
+        shell: bash
+
+      - name: Prepare bundled OpenCode CLI
+        working-directory: packages/electron
+        shell: bash
+        run: |
+          bun run prepare:opencode-cli
+          bun run verify:opencode-cli
+
+      - name: Bundle main process
+        working-directory: packages/electron
+        run: bun run bundle:main
+        shell: bash
+
+      - name: Rebuild native modules
+        working-directory: packages/electron
+        shell: bash
+        run: node ./scripts/rebuild-native.mjs
+
+      - name: Build portable app (unpacked dir)
+        working-directory: packages/electron
+        shell: bash
+        run: |
+          node ./scripts/package.mjs --dir --${{ env.PLATFORM }} --${{ env.ARCH }} --publish=never
+          bun run verify:opencode-cli:packaged
+
+      - name: Zip portable build
+        shell: pwsh
+        run: |
+          $src = "packages/electron/dist/${{ env.PLATFORM }}-unpacked"
+          $dest = "${{ env.APP_NAME }}-portable-${{ env.PLATFORM }}-${{ env.ARCH }}.zip"
+          if (Test-Path $dest) { Remove-Item $dest -Force }
+          Compress-Archive -Path $src -DestinationPath $dest
+          Write-Output "Artifact created: $dest"
+
+      - name: Upload portable build
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-portable-${{ env.PLATFORM }}-${{ env.ARCH }}
+          path: ${{ env.APP_NAME }}-portable-${{ env.PLATFORM }}-${{ env.ARCH }}.zip
+          retention-days: 7
