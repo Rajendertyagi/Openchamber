@@ -39,15 +39,21 @@ jobs:
           path: |
             **/node_modules
             ~/.bun
-          key: ${{ runner.os }}-modules-${{ hashFiles('bun.lockb') }}
+          # Bump cache-version to force fresh cache (old cache contains .bun/ symlinks that cause EPERM)
+          key: ${{ runner.os }}-modules-v2-${{ hashFiles('bun.lockb') }}
           restore-keys: |
-            ${{ runner.os }}-modules-
+            ${{ runner.os }}-modules-v2-
 
-      - name: Remove .bun symlinks (EPERM workaround)
-        shell: bash
+      - name: Prune stale node_modules/.bun
+        shell: pwsh
         run: |
-          rm -rf node_modules/.bun 2>/dev/null || true
-          echo "✓ .bun directory removed"
+          if (Test-Path "node_modules/.bun") {
+            Write-Output "Removing .bun directory..."
+            Remove-Item -LiteralPath "node_modules/.bun" -Recurse -Force -ErrorAction Stop
+            Write-Output "✓ .bun directory removed"
+          } else {
+            Write-Output "No .bun directory found"
+          }
 
       - name: Cache OpenCode CLI
         id: cache-opencode
@@ -59,10 +65,22 @@ jobs:
           restore-keys: |
             opencode-cli-${{ runner.os }}-${{ env.ARCH }}-
 
+      - name: Remove any stale .bun before install
+        shell: pwsh
+        run: |
+          if (Test-Path "node_modules/.bun") {
+            Remove-Item -LiteralPath "node_modules/.bun" -Recurse -Force -ErrorAction Stop
+            Write-Output "✓ Cleaned .bun before install"
+          }
+
       - name: Install dependencies
         shell: bash
         run: |
           bun install --frozen-lockfile --ignore-scripts
+
+      - name: Remove .bun after install and run postinstall steps with bun
+        shell: bash
+        run: |
           rm -rf node_modules/.bun 2>/dev/null || true
           bun ./fix-deprecation.js
           bun patch-package
