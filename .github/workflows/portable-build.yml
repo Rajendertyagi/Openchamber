@@ -19,10 +19,6 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
 
-      - uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-
       - name: Show versions
         shell: bash
         run: |
@@ -47,14 +43,8 @@ jobs:
           key: opencode-cli-${{ runner.os }}-${{ hashFiles('package.json', 'packages/electron/scripts/prepare-opencode-cli.mjs') }}
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile --ignore-scripts
+        run: bun install --frozen-lockfile
         shell: bash
-
-      - name: Apply patches
-        shell: bash
-        run: |
-          rm -rf node_modules/.bun
-          bunx patch-package
 
       - name: Build web UI
         working-directory: packages/electron
@@ -80,16 +70,13 @@ jobs:
 
       - name: Rebuild native modules
         working-directory: packages/electron
+        run: bun run rebuild:native
         shell: bash
-        run: |
-          rm -rf ../../node_modules/.bun
-          node ./scripts/rebuild-native.mjs
 
       - name: Package portable build
         working-directory: packages/electron
         shell: bash
         run: |
-          rm -rf ../../node_modules/.bun
           node ./scripts/package.mjs --dir --${{ env.PLATFORM }} --${{ env.ARCH }} --publish=never
           bun run verify:opencode-cli:packaged
 
