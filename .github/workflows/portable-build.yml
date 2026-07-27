@@ -1,123 +1,95 @@
-name: Build Codeg Portable Windows x64
+name: Portable Build
 
 on:
   workflow_dispatch:
 
 permissions:
   contents: read
-  actions: read
 
 jobs:
-  build:
+  build-windows-portable:
+    name: Build Windows Portable x64
     runs-on: windows-2022
-    timeout-minutes: 90
     env:
-      TAURI_SIGNING_PRIVATE_KEY: ""
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
-
+      APP_NAME: OpenChamber
+      ARCH: x64
+      PLATFORM: win
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+      - uses: oven-sh/setup-bun@v2
 
-      - name: Setup Node
-        uses: actions/setup-node@v7
+      - name: Show versions
+        shell: bash
+        run: |
+          node -v
+          bun -v
+
+      - name: Cache node_modules
+        uses: actions/cache@v6
         with:
-          node-version: 24
-          cache: pnpm
+          path: |
+            **/node_modules
+            ~/.bun
+          key: ${{ runner.os }}-modules-${{ hashFiles('bun.lockb') }}
+          restore-keys: |
+            ${{ runner.os }}-modules-
 
-      - name: Install Rust toolchain and target
-        uses: dtolnay/rust-toolchain@stable
+      - name: Cache OpenCode CLI
+        id: cache-opencode
+        uses: actions/cache@v6
         with:
-          targets: x86_64-pc-windows-msvc
+          path: packages/electron/.cache/opencode-cli
+          key: opencode-cli-${{ runner.os }}-${{ hashFiles('package.json', 'packages/electron/scripts/prepare-opencode-cli.mjs') }}
 
-      - name: Cache Rust target and cargo registry
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: ./src-tauri -> target
-          shared-key: win64-desktop
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        shell: bash
 
-      - name: Install frontend deps and build
+      - name: Build web UI
+        working-directory: packages/electron
+        run: bun run build:web-assets
+        shell: bash
+
+      - name: Prepare OpenCode CLI
+        if: steps.cache-opencode.outputs.cache-hit != 'true'
+        working-directory: packages/electron
+        run: bun run prepare:opencode-cli && bun run verify:opencode-cli
+        shell: bash
+
+      - name: Verify cached OpenCode CLI
+        if: steps.cache-opencode.outputs.cache-hit == 'true'
+        working-directory: packages/electron
+        run: bun run verify:opencode-cli
+        shell: bash
+
+      - name: Bundle main process
+        working-directory: packages/electron
+        run: bun run bundle:main
+        shell: bash
+
+      - name: Rebuild native modules
+        working-directory: packages/electron
+        run: bun run rebuild:native
+        shell: bash
+
+      - name: Package portable build
+        working-directory: packages/electron
+        shell: bash
+        run: |
+          node ./scripts/package.mjs --dir --${{ env.PLATFORM }} --${{ env.ARCH }} --publish=never
+          bun run verify:opencode-cli:packaged
+
+      - name: Create zip
         shell: pwsh
         run: |
-          pnpm install --frozen-lockfile
-          pnpm build
-
-      - name: Pre-build codeg-mcp sidecar (release)
-        shell: pwsh
-        working-directory: src-tauri
-        run: |
-          cargo build --release --bin codeg-mcp --no-default-features --target x86_64-pc-windows-msvc
-          New-Item -ItemType Directory -Force -Path binaries | Out-Null
-          $src = "target/x86_64-pc-windows-msvc/release/codeg-mcp.exe"
-          if (Test-Path $src) {
-            Copy-Item -Path $src -Destination "binaries/codeg-mcp-x86_64-pc-windows-msvc.exe" -Force
-          } else {
-            Write-Warning "Sidecar not found at $src"
-          }
-
-      - name: Build desktop binary (Tauri)
-        shell: pwsh
-        run: |
-          pnpm tauri build --target x86_64-pc-windows-msvc --bundles none
-
-      - name: Create portable launcher (batch)
-        shell: pwsh
-        run: |
-          $bat = @'
-          @echo off
-          cd /d "%~dp0"
-          set "CODEG_HOME=%~dp0data"
-          set "CODEG_DATA_DIR=%~dp0data"
-          set "CODEG_STATIC_DIR=%~dp0web"
-          start "" "%~dp0codeg.exe"
-          '@
-          $bat | Out-File -FilePath start-codeg-portable.bat -Encoding ascii
-
-      - name: Package portable zip
-        shell: pwsh
-        run: |
-          $artifact = "codeg-portable-win64"
-          $dir = "dist/$artifact"
-          New-Item -ItemType Directory -Force -Path $dir | Out-Null
-
-          $releaseDir = "src-tauri/target/x86_64-pc-windows-msvc/release"
-
-          if (Test-Path "$releaseDir\codeg.exe") {
-            Copy-Item -Path "$releaseDir\codeg.exe" -Destination $dir -Force
-          } else {
-            Write-Error "codeg.exe not found in $releaseDir"
-            exit 1
-          }
-
-          if (Test-Path "src-tauri\binaries\codeg-mcp-x86_64-pc-windows-msvc.exe") {
-            Copy-Item -Path "src-tauri\binaries\codeg-mcp-x86_64-pc-windows-msvc.exe" -Destination $dir -Force
-          } elseif (Test-Path "$releaseDir\codeg-mcp.exe") {
-            Copy-Item -Path "$releaseDir\codeg-mcp.exe" -Destination $dir -Force
-          } else {
-            Write-Warning "codeg-mcp not found; continuing without it"
-          }
-
-          if (Test-Path "out") {
-            New-Item -ItemType Directory -Force -Path "$dir\web" | Out-Null
-            Copy-Item -Recurse -Path "out\*" -Destination "$dir\web" -Force
-          } else {
-            Write-Warning "Frontend output 'out' not found; ensure pnpm build outputs to 'out'"
-          }
-
-          Copy-Item -Path "start-codeg-portable.bat" -Destination $dir -Force
-
-          Get-ChildItem -Path $releaseDir -Filter "*.dll" -ErrorAction SilentlyContinue |
-            ForEach-Object { Copy-Item -Path $_.FullName -Destination $dir -Force }
-
-          $zipPath = "dist/$artifact.zip"
-          Remove-Item -Path $zipPath -ErrorAction SilentlyContinue
-          Compress-Archive -Path (Join-Path $dir '*') -DestinationPath $zipPath -Force
+          $src = "packages/electron/dist/${{ env.PLATFORM }}-unpacked"
+          $dest = "${{ env.APP_NAME }}-portable-${{ env.PLATFORM }}-${{ env.ARCH }}.zip"
+          Compress-Archive -Path $src -DestinationPath $dest -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: codeg-portable-win64
-          path: dist/codeg-portable-win64.zip
+          name: ${{ env.APP_NAME }}-portable-${{ env.PLATFORM }}-${{ env.ARCH }}
+          path: ${{ env.APP_NAME }}-portable-${{ env.PLATFORM }}-${{ env.ARCH }}.zip
+          retention-days: 7
