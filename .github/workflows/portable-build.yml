@@ -10,23 +10,31 @@ jobs:
   build-windows-portable:
     name: Build Windows Portable x64
     runs-on: windows-2022
+    timeout-minutes: 60
     env:
       APP_NAME: OpenChamber
       ARCH: x64
       PLATFORM: win
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
       - name: Show versions
         shell: bash
         run: |
-          node -v
           bun -v
 
+      - name: Get bundled OpenCode CLI version
+        id: opencode_cli_version
+        shell: bash
+        run: |
+          VERSION=$(bun -e "console.log(require('./package.json').dependencies['@opencode-ai/sdk'])")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
       - name: Cache node_modules
-        uses: actions/cache@v6
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        continue-on-error: true
         with:
           path: |
             **/node_modules
@@ -35,16 +43,29 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-modules-
 
+      - name: Remove .bun symlinks (EPERM workaround)
+        shell: bash
+        run: |
+          rm -rf node_modules/.bun 2>/dev/null || true
+          echo "✓ .bun directory removed"
+
       - name: Cache OpenCode CLI
         id: cache-opencode
-        uses: actions/cache@v6
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        continue-on-error: true
         with:
           path: packages/electron/.cache/opencode-cli
-          key: opencode-cli-${{ runner.os }}-${{ hashFiles('package.json', 'packages/electron/scripts/prepare-opencode-cli.mjs') }}
+          key: opencode-cli-${{ runner.os }}-${{ env.ARCH }}-${{ steps.opencode_cli_version.outputs.version }}
+          restore-keys: |
+            opencode-cli-${{ runner.os }}-${{ env.ARCH }}-
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
         shell: bash
+        run: |
+          bun install --frozen-lockfile --ignore-scripts
+          rm -rf node_modules/.bun 2>/dev/null || true
+          bun ./fix-deprecation.js
+          bun patch-package
 
       - name: Build web UI
         working-directory: packages/electron
@@ -80,16 +101,68 @@ jobs:
           node ./scripts/package.mjs --dir --${{ env.PLATFORM }} --${{ env.ARCH }} --publish=never
           bun run verify:opencode-cli:packaged
 
+      - name: Rename build output
+        shell: bash
+        run: |
+          if [ -d "packages/electron/dist/${{ env.PLATFORM }}-unpacked" ]; then
+            mv "packages/electron/dist/${{ env.PLATFORM }}-unpacked" "packages/electron/dist/${{ env.APP_NAME }}"
+            echo "✓ Build output renamed successfully"
+          else
+            echo "⚠ Build directory not found"
+            exit 1
+          fi
+
+      - name: Verify build artifacts exist
+        shell: pwsh
+        run: |
+          $buildDir = "packages/electron/dist/${{ env.APP_NAME }}"
+          if (-not (Test-Path $buildDir)) {
+            Write-Error "Build directory not found: $buildDir"
+            exit 1
+          }
+          Write-Output "✓ Build artifacts verified at: $buildDir"
+
       - name: Create zip
         shell: pwsh
         run: |
-          $src = "packages/electron/dist/${{ env.PLATFORM }}-unpacked"
+          $src = "packages/electron/dist/${{ env.APP_NAME }}/*"
           $dest = "${{ env.APP_NAME }}-portable-${{ env.PLATFORM }}-${{ env.ARCH }}.zip"
+
+          if (-not (Test-Path "packages/electron/dist/${{ env.APP_NAME }}")) {
+            Write-Error "Source directory not found"
+            exit 1
+          }
+
           Compress-Archive -Path $src -DestinationPath $dest -Force
 
+          if (Test-Path $dest) {
+            $size = (Get-Item $dest).Length / 1MB
+            Write-Output "✓ Zip created successfully: $dest (${size:F2} MB)"
+          } else {
+            Write-Error "Failed to create zip file"
+            exit 1
+          }
+
+      - name: Log build info
+        shell: bash
+        run: |
+          echo "Build Summary:"
+          echo "  Platform: ${{ env.PLATFORM }}"
+          echo "  Architecture: ${{ env.ARCH }}"
+          echo "  App Name: ${{ env.APP_NAME }}"
+          ls -lh "${{ env.APP_NAME }}-portable-${{ env.PLATFORM }}-${{ env.ARCH }}.zip" || echo "⚠ Zip file not found"
+
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ env.APP_NAME }}-portable-${{ env.PLATFORM }}-${{ env.ARCH }}
           path: ${{ env.APP_NAME }}-portable-${{ env.PLATFORM }}-${{ env.ARCH }}.zip
           retention-days: 7
+          if-no-files-found: error
+
+      - name: Clean up temporary build files
+        if: always()
+        shell: bash
+        run: |
+          rm -rf "packages/electron/dist/${{ env.APP_NAME }}" || true
+          echo "✓ Temporary files cleaned up"
