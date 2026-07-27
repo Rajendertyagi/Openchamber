@@ -55,8 +55,11 @@ jobs:
             opencode-cli-${{ runner.os }}-${{ env.ARCH }}-
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
         shell: bash
+        run: |
+          bun install --frozen-lockfile --ignore-scripts
+          bun ./fix-deprecation.js
+          bun patch-package
 
       - name: Build web UI
         working-directory: packages/electron
