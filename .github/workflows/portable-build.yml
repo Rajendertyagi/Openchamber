@@ -20,10 +20,9 @@ jobs:
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
-      - name: Show versions
+      - name: Show bun version
         shell: bash
-        run: |
-          bun -v
+        run: bun -v
 
       - name: Get bundled OpenCode CLI version
         id: opencode_cli_version
@@ -32,28 +31,14 @@ jobs:
           VERSION=$(bun -e "console.log(require('./package.json').dependencies['@opencode-ai/sdk'])")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Cache node_modules
+      - name: Cache bun store (not node_modules — avoids .bun/ symlink EPERM)
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         continue-on-error: true
         with:
-          path: |
-            **/node_modules
-            ~/.bun
-          # Bump cache-version to force fresh cache (old cache contains .bun/ symlinks that cause EPERM)
-          key: ${{ runner.os }}-modules-v2-${{ hashFiles('bun.lockb') }}
+          path: ~/.bun
+          key: ${{ runner.os }}-bun-store-${{ hashFiles('bun.lockb') }}
           restore-keys: |
-            ${{ runner.os }}-modules-v2-
-
-      - name: Prune stale node_modules/.bun
-        shell: pwsh
-        run: |
-          if (Test-Path "node_modules/.bun") {
-            Write-Output "Removing .bun directory..."
-            Remove-Item -LiteralPath "node_modules/.bun" -Recurse -Force -ErrorAction Stop
-            Write-Output "✓ .bun directory removed"
-          } else {
-            Write-Output "No .bun directory found"
-          }
+            ${{ runner.os }}-bun-store-
 
       - name: Cache OpenCode CLI
         id: cache-opencode
@@ -65,20 +50,12 @@ jobs:
           restore-keys: |
             opencode-cli-${{ runner.os }}-${{ env.ARCH }}-
 
-      - name: Remove any stale .bun before install
-        shell: pwsh
-        run: |
-          if (Test-Path "node_modules/.bun") {
-            Remove-Item -LiteralPath "node_modules/.bun" -Recurse -Force -ErrorAction Stop
-            Write-Output "✓ Cleaned .bun before install"
-          }
-
       - name: Install dependencies
         shell: bash
         run: |
           bun install --frozen-lockfile --ignore-scripts
 
-      - name: Remove .bun after install and run postinstall steps with bun
+      - name: Run postinstall steps with bun (avoid node EPERM on .bun/)
         shell: bash
         run: |
           rm -rf node_modules/.bun 2>/dev/null || true
