@@ -50,17 +50,10 @@ jobs:
           restore-keys: |
             opencode-cli-${{ runner.os }}-${{ env.ARCH }}-
 
-      - name: Install dependencies
+      - name: Install dependencies (allow postinstall — fresh node_modules, no stale .bun/)
         shell: bash
         run: |
-          bun install --frozen-lockfile --ignore-scripts
-
-      - name: Run postinstall steps with bun (avoid node EPERM on .bun/)
-        shell: bash
-        run: |
-          rm -rf node_modules/.bun 2>/dev/null || true
-          bun ./fix-deprecation.js
-          bun patch-package
+          bun install --frozen-lockfile
 
       - name: Build web UI
         working-directory: packages/electron
