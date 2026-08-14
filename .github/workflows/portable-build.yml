@@ -52,6 +52,13 @@ jobs:
           node ./scripts/package.mjs --dir --${{ env.PLATFORM }} --${{ env.ARCH }} --publish=never
           bun run verify:opencode-cli:packaged
 
+      - name: Force close running build binaries
+        shell: pwsh
+        run: |
+          Stop-Process -Name "OpenChamber" -Force -ErrorAction SilentlyContinue
+          Stop-Process -Name "opencode" -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 2
+
       - name: Rename build output
         shell: bash
         run: |
