@@ -18,6 +18,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 import { rangeToMarkdown, trimSelectionValue, wrapMarkdownSelectionForChat } from './selectionMarkdown';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
+import { registerActiveSelectionToolbar } from '@/lib/addSelectionToChat';
 import { collectSelectionOverlayRects } from '@/lib/selectionOverlayRects';
 
 interface TextSelectionMenuProps {
@@ -106,6 +107,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
   const openRafRef = React.useRef<number | null>(null);
   const mouseUpTimeoutRef = React.useRef<number | null>(null);
   const isMenuVisibleRef = React.useRef(false);
+  const activeAddToChatCleanupRef = React.useRef<(() => void) | null>(null);
   const createSession = useSessionUIStore((state) => state.createSession);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
@@ -156,6 +158,8 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
 
   React.useEffect(() => {
     return () => {
+      activeAddToChatCleanupRef.current?.();
+      activeAddToChatCleanupRef.current = null;
       if (openRafRef.current !== null) {
         window.cancelAnimationFrame(openRafRef.current);
         openRafRef.current = null;
@@ -169,6 +173,8 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
 
   const hideMenu = React.useCallback(() => {
     pendingSelectionRef.current = null;
+    activeAddToChatCleanupRef.current?.();
+    activeAddToChatCleanupRef.current = null;
     setCommentRects(null);
 
     if (!isMenuVisibleRef.current) {
@@ -209,11 +215,29 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     return Math.min(Math.max(anchorX, minX), maxX);
   }, []);
 
+  const addMarkdownToChat = React.useCallback((markdownText: string) => {
+    const markdownBlock = wrapMarkdownSelectionForChat(markdownText);
+    setPendingInputText(markdownBlock, 'append');
+
+    hideMenu();
+
+    window.getSelection()?.removeAllRanges();
+    queueMicrotask(() => {
+      focusChatInput();
+    });
+  }, [hideMenu, setPendingInputText]);
+
   const showMenu = React.useCallback(() => {
     if (!pendingSelectionRef.current) return;
 
     const { plainText, markdownText, rect, messageId } = pendingSelectionRef.current;
     const shouldAnimateIn = !position.show;
+
+    activeAddToChatCleanupRef.current?.();
+    activeAddToChatCleanupRef.current = registerActiveSelectionToolbar({
+      addToChat: () => addMarkdownToChat(markdownText),
+      dismiss: hideMenu,
+    });
 
     // Position menu above the selection
     const menuX = isMobile
@@ -241,7 +265,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
         openRafRef.current = null;
       });
     }
-  }, [getDesktopClampedX, isMobile, position.show]);
+  }, [addMarkdownToChat, getDesktopClampedX, hideMenu, isMobile, position.show]);
 
   React.useLayoutEffect(() => {
     if (!position.show || isMobile || !menuRef.current) {
@@ -259,6 +283,25 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
       x: getDesktopClampedX(prev.x),
     }));
   }, [getDesktopClampedX, isMobile, position.show]);
+
+  // The desktop popup hangs above its anchor, so a tall comment box near the
+  // top of the chat can climb over the app header. On the desktop shell the
+  // header is a window drag zone, which makes the overlapped part of the
+  // textarea untouchable, so the popup is pushed down until its top edge stays
+  // inside the chat container.
+  React.useLayoutEffect(() => {
+    if (!position.show || isMobile || !menuRef.current) {
+      return;
+    }
+
+    const container = containerRef.current;
+    const minTop = (container ? container.getBoundingClientRect().top : 0) + 4;
+    const menuTop = menuRef.current.getBoundingClientRect().top;
+    if (menuTop < minTop) {
+      const delta = minTop - menuTop;
+      setPosition((prev) => ({ ...prev, y: prev.y + delta }));
+    }
+  }, [containerRef, isMobile, position.show, position.y, commentMode, commentText]);
 
   React.useEffect(() => {
     if (!position.show || isMobile) {
@@ -409,18 +452,8 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
 
   const handleAddToChat = React.useCallback(() => {
     if (!selectedTextMarkdown) return;
-
-    const markdownBlock = wrapMarkdownSelectionForChat(selectedTextMarkdown);
-    setPendingInputText(markdownBlock, 'append');
-    
-    hideMenu();
-    
-    // Clear selection
-    window.getSelection()?.removeAllRanges();
-    queueMicrotask(() => {
-      focusChatInput();
-    });
-  }, [selectedTextMarkdown, setPendingInputText, hideMenu]);
+    addMarkdownToChat(selectedTextMarkdown);
+  }, [addMarkdownToChat, selectedTextMarkdown]);
 
   const handleOpenComment = React.useCallback(() => {
     if (!selectedTextMarkdown) return;
@@ -711,7 +744,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
   return createPortal(
     <div
       ref={menuRef}
-      className="fixed z-50"
+      className="app-region-no-drag fixed z-50"
       style={{
         left: position.x,
         top: position.y,
