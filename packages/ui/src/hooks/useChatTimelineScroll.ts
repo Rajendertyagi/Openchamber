@@ -7,10 +7,18 @@ import { useUIStore } from '@/stores/useUIStore';
 import {
     CHAT_LIST_ANCHOR_OFFSET,
     getAnchoredTurnMetrics,
+    getRowBottom,
+    resolveRealContentEndOffset,
     resolveTimelineIsAtEnd,
+    TIMELINE_FOLLOW_REARM_THRESHOLD_PX,
     type TimelineListMeasurementState,
     type TimelineScrollMode,
 } from '@/components/chat/lib/scroll/timelineScrollAnchoring';
+import {
+    isFollowReleaseKey,
+    isMiddleButtonPan,
+    nestedScrollableConsumesWheelUp,
+} from '@/components/chat/lib/scroll/timelineScrollIntent';
 
 // ──────────────────────────────────────────────────────────────────────────
 // Chat timeline scroll ownership.
@@ -129,6 +137,8 @@ export const useChatTimelineScroll = ({
     // True after a real gesture until an explicit opt back in; drives the
     // overlay scrollbar suppression instead of the anchor's mere existence.
     const [userOwnsScroll, setUserOwnsScroll] = React.useState(false);
+    const userOwnsScrollRef = React.useRef(userOwnsScroll);
+    userOwnsScrollRef.current = userOwnsScroll;
 
     const modeRef = React.useRef<TimelineScrollMode>('following-end');
     const isAtEndRef = React.useRef(true);
@@ -314,6 +324,14 @@ export const useChatTimelineScroll = ({
         }
     }, [clearAnchor, clearGoToBottomReasserts, hideScrollButton]);
 
+    // User preference: with auto-follow off, streaming growth never moves the
+    // viewport. Sending from the live edge still parks the new message at the
+    // top, but no glide or end-follow correction runs afterwards; sending from
+    // mid-history leaves the viewport untouched.
+    const streamingAutoFollowEnabled = useUIStore((state) => state.streamingAutoFollowEnabled);
+    const streamingAutoFollowEnabledRef = React.useRef(streamingAutoFollowEnabled);
+    streamingAutoFollowEnabledRef.current = streamingAutoFollowEnabled;
+
     // Sending arms the anchor. The message id is not known here (the optimistic
     // row is created by the store), so the next new user message id claims it.
     // Whether the send-time anchor positioning may animate. Sending from the
@@ -324,6 +342,11 @@ export const useChatTimelineScroll = ({
     const anchorPositionInstantRef = React.useRef(false);
 
     const scrollToBottomOnSend = React.useCallback(() => {
+        // With auto-follow off, a reader who scrolled away from the end stays
+        // exactly where they are: the sent message is not anchored and the
+        // scroll-to-bottom pill (already showing) leads to it. From the live
+        // edge, sending anchors the new turn as usual.
+        if (!streamingAutoFollowEnabledRef.current && !isAtEndRef.current) return;
         anchorPositionInstantRef.current = !isAtEndRef.current;
         isAtEndRef.current = true;
         setUserOwnsScroll(false);
@@ -536,20 +559,16 @@ export const useChatTimelineScroll = ({
         first: null,
         second: null,
     });
-    // User preference: with auto-follow off, streaming growth never moves the
-    // viewport — the anchored user message still parks at the top on send, but
-    // no glide or end-follow correction runs afterwards.
-    const streamingAutoFollowEnabled = useUIStore((state) => state.streamingAutoFollowEnabled);
-    const streamingAutoFollowEnabledRef = React.useRef(streamingAutoFollowEnabled);
-    streamingAutoFollowEnabledRef.current = streamingAutoFollowEnabled;
-
     // While the list width is resizing, every pinning write fights the
     // per-frame row re-measure and the pinned viewport shakes. Corrections
     // stand down for the whole resize and the visible content is held by the
     // list's size compensation instead. Deliberately NO snap back to the end
-    // afterwards: a slow drag settles repeatedly, and each snap reads as the
-    // very jump this suspension removes — geometry changed, staying where the
-    // reader is beats re-asserting the edge.
+    // afterwards for a mid-conversation reader: a slow drag settles
+    // repeatedly, and each snap reads as the very jump this suspension
+    // removes. A reader who WAS at the end is the exception — after rows
+    // re-wrap, stale cached sizes can leave a large phantom gap below the
+    // last row, so re-asserting the end once on settle is what "staying
+    // where the reader is" means for them.
     const widthResizingRef = React.useRef(false);
     React.useEffect(() => {
         if (!scrollNode || typeof ResizeObserver === 'undefined') return;
@@ -569,6 +588,27 @@ export const useChatTimelineScroll = ({
             quietTimer = setTimeout(() => {
                 quietTimer = null;
                 widthResizingRef.current = false;
+                if (isAtEndRef.current && pendingAnchorRef.current === null) {
+                    // Not scrollToEnd: the list's end offset comes from the
+                    // total content length, which still carries pre-wrap row
+                    // sizes (and any reserved anchored end space) right after a
+                    // width change. Landing there parks the last row near the
+                    // top of the viewport with a blank tail below it. Target
+                    // the measured bottom of the last real row instead.
+                    const list = listRef.current;
+                    const state = list?.getState();
+                    const offset = state
+                        ? resolveRealContentEndOffset({
+                            state,
+                            composerOverlayHeight: composerOverlayHeightRef.current,
+                        })
+                        : null;
+                    if (list && offset !== null) {
+                        void list.scrollToOffset({ offset, animated: false });
+                    } else {
+                        void list?.scrollToEnd({ animated: false });
+                    }
+                }
             }, 350);
         });
         observer.observe(scrollNode);
@@ -578,17 +618,94 @@ export const useChatTimelineScroll = ({
         };
     }, [scrollNode]);
 
+    // Keep the live edge in view after content growth. Within a viewport of
+    // the end the remaining distance is glided so a revealed block and the
+    // scroll read as one motion; further behind, the viewport first jumps to
+    // one screen above the end and glides only that last screen, so the
+    // reader is never left staring at a gap several screens tall. Writes go
+    // to the scroll node directly: routing each chunk through the list's
+    // scrollToEnd bookkeeping roughly doubled frame production when measured.
+    // A user gesture interrupts the native smooth scroll on its own, and the
+    // gesture handler drops live follow so no later correction re-engages.
+    const followEnd = React.useCallback(() => {
+        const node = scrollRef.current;
+        if (!node) return;
+        const end = node.scrollHeight - node.clientHeight;
+        const distance = end - node.scrollTop;
+        if (distance <= 1) return;
+        if (distance > node.clientHeight) {
+            node.scrollTop = end - node.clientHeight;
+        }
+        node.scrollTo({ top: end, behavior: 'smooth' });
+    }, []);
+
     const onTimelineDataChange = React.useCallback(() => {
         if (widthResizingRef.current) return;
-        if (!streamingAutoFollowEnabledRef.current) return;
+
+        // Stranded-viewport rescue, independent of any follow mode or
+        // preference: when off-screen size estimates settle smaller than
+        // estimated, the measured content can end ABOVE the viewport while
+        // the scroll offset stays at the stale end — the reader faces a blank
+        // phantom tail with every row out of reach above. That state is never
+        // intentional, so it is corrected even when auto-follow is off. Only
+        // a fully blank viewport qualifies; partial visibility is left alone.
+        if (!userOwnsScrollRef.current) {
+            const list = listRef.current;
+            if (list) {
+                const state = list.getState();
+                const lastIndex = state.data.length - 1;
+                const lastBottom = lastIndex >= 0 ? getRowBottom(state, lastIndex) : null;
+                if (lastBottom !== null && state.scroll > lastBottom) {
+                    const offset = resolveRealContentEndOffset({
+                        state,
+                        composerOverlayHeight: composerOverlayHeightRef.current,
+                        extraInset: CHAT_LIST_ANCHOR_OFFSET,
+                    });
+                    if (offset !== null) {
+                        void list.scrollToOffset({ offset, animated: false });
+                        return;
+                    }
+                }
+            }
+        }
+
+        if (!streamingAutoFollowEnabledRef.current) {
+            // With auto-follow off nothing moves the viewport, so a growing
+            // reply slides below the visible area without a single scroll
+            // event — and the at-end transition that offers the pill never
+            // fires. Content growth is the signal here: once the real last
+            // row extends past what the composer leaves visible, the reader
+            // is factually behind and the pill must say so.
+            const list = listRef.current;
+            if (list && isAtEndRef.current) {
+                const state = list.getState();
+                const lastIndex = state.data.length - 1;
+                const lastBottom = lastIndex >= 0 ? getRowBottom(state, lastIndex) : null;
+                if (lastBottom !== null) {
+                    const visibleBottom = state.scroll + state.scrollLength - composerOverlayHeightRef.current;
+                    if (lastBottom - visibleBottom > TIMELINE_FOLLOW_REARM_THRESHOLD_PX) {
+                        isAtEndRef.current = false;
+                        setIsPinned(false);
+                        scheduleShowScrollButton();
+                    }
+                }
+            }
+            return;
+        }
         if (!isLiveFollowActive()) return;
 
-        // Since @legendapp/list 3.3.x, maintainScrollAtEnd follows content
-        // growth on its own — including a tail row growing in place — and
-        // releases when the user scrolls away. Following the end therefore
-        // needs no correction here; this handler only serves the
-        // anchored-turn glide below.
-        if (modeRef.current === 'following-end') return;
+        // Following the end is owned here, not left to the list's
+        // maintainScrollAtEnd. The list's animated maintain is single-flight:
+        // growth that lands while a glide is still in flight is dropped until
+        // the next trigger, and its re-pin threshold is a tenth of the
+        // viewport. In a narrow viewport (the VS Code sidebar) one revealed
+        // block is several viewports tall, so every block left the reader a
+        // second behind and multiple screens above the live edge — measured
+        // at 45% of the stream time spent 500-1600px behind at 420x640.
+        if (modeRef.current === 'following-end') {
+            followEnd();
+            return;
+        }
 
         const frames = dataChangeFramesRef.current;
         if (frames.first !== null) cancelAnimationFrame(frames.first);
@@ -637,7 +754,7 @@ export const useChatTimelineScroll = ({
 
             });
         });
-    }, [isLiveFollowActive]);
+    }, [followEnd, isLiveFollowActive, scheduleShowScrollButton]);
 
     // The streaming tail grows inside one row without changing the entries
     // array, so data-change callbacks are silent for the entire stream. The
@@ -679,8 +796,12 @@ export const useChatTimelineScroll = ({
             onManualNavigationRef.current();
         };
         const handleWheel = (event: WheelEvent) => {
-            // Scrolling toward the end is not opting out of follow.
-            if (event.deltaY < 0 && canScrollUp()) gesture();
+            // Scrolling toward the end is not opting out of follow, and an
+            // upward wheel that a nested scroller still consumes never
+            // reaches the timeline.
+            if (event.deltaY < 0 && !nestedScrollableConsumesWheelUp(scrollNode, event.target) && canScrollUp()) {
+                gesture();
+            }
         };
         // Touch mirrors wheel by finger direction, not by having already left
         // the end: while a stream keeps re-pinning the viewport, waiting for
@@ -704,14 +825,19 @@ export const useChatTimelineScroll = ({
             touchLastY = null;
         };
         const handlePointerDown = (event: PointerEvent) => {
-            // The scrollbar track is the scroll node itself; a tap on a row
-            // only breaks follow when the viewport already left the end.
+            // A middle-button pan scrolls without wheel events (and is the
+            // only scroll gesture for wheel-less mice), so the press is the
+            // opt-out. Otherwise the scrollbar track is the scroll node
+            // itself; a tap on a row only breaks follow when the viewport
+            // already left the end.
+            if (isMiddleButtonPan(scrollNode, event)) {
+                if (canScrollUp()) gesture();
+                return;
+            }
             if ((event.target === scrollNode || !isAtEndRef.current) && canScrollUp()) gesture();
         };
         const handleKeyDown = (event: KeyboardEvent) => {
-            if ((event.key === 'PageUp' || event.key === 'Home' || event.key === 'ArrowUp') && canScrollUp()) {
-                gesture();
-            }
+            if (isFollowReleaseKey(event) && canScrollUp()) gesture();
         };
         const handleScroll = () => {
             queueSave();
