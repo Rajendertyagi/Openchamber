@@ -15,11 +15,49 @@ jobs:
       APP_NAME: OpenChamber
       ARCH: x64
       PLATFORM: win
+      BUN_VERSION: "2.4.0"
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout
+        uses: actions/checkout@v6
 
-      # Use latest Bun 2.x release (currently 2.4)
-      - uses: oven-sh/setup-bun@v2
+      - name: Cache Bun
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun
+            ~/.cache/bun
+          key: bun-${{ runner.os }}-v${{ env.BUN_VERSION }}
+          restore-keys: |
+            bun-${{ runner.os }}-v
+
+      - name: Setup Bun (force 2.4.0)
+        uses: oven-sh/setup-bun@v2
+        with:
+          version: ${{ env.BUN_VERSION }}
+
+      - name: Verify Bun version
+        shell: bash
+        run: |
+          echo "bun --version:"
+          bun --version
+
+      - name: Cache npm (used by Bun for some registries)
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.cache/pip/wheels
+          key: python-pip-${{ runner.os }}-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            python-pip-${{ runner.os }}-
 
       - name: Install dependencies
         shell: bash
