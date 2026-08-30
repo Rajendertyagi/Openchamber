@@ -16,10 +16,10 @@ jobs:
       ARCH: x64
       PLATFORM: win
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@v6
 
-      # Updated Bun setup to v2.4.0
-      - uses: oven-sh/setup-bun@v2.4.0
+      # Use latest Bun 2.x release (currently 2.4)
+      - uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
         shell: bash
@@ -90,7 +90,7 @@ jobs:
           ls -lh "packages/electron/dist/${{ env.APP_NAME }}" || echo "⚠ Build directory not found"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.APP_NAME }}-portable-${{ env.PLATFORM }}-${{ env.ARCH }}
           path: packages/electron/dist/${{ env.APP_NAME }}
