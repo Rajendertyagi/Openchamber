@@ -18,12 +18,12 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      # Updated Bun setup to v2.4.0
+      - uses: oven-sh/setup-bun@v2.4.0
 
       - name: Install dependencies
         shell: bash
-        run: |
-          bun install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       - name: Build web UI
         working-directory: packages/electron
@@ -80,27 +80,6 @@ jobs:
           }
           Write-Output "✓ Build artifacts verified at: $buildDir"
 
-      - name: Create zip
-        shell: pwsh
-        run: |
-          $src = "packages/electron/dist/${{ env.APP_NAME }}/*"
-          $dest = "${{ env.APP_NAME }}-portable-${{ env.PLATFORM }}-${{ env.ARCH }}.zip"
-
-          if (-not (Test-Path "packages/electron/dist/${{ env.APP_NAME }}")) {
-            Write-Error "Source directory not found"
-            exit 1
-          }
-
-          Compress-Archive -Path $src -DestinationPath $dest -Force
-
-          if (Test-Path $dest) {
-            $size = (Get-Item $dest).Length / 1MB
-            Write-Output "✓ Zip created successfully: $dest (${size:F2} MB)"
-          } else {
-            Write-Error "Failed to create zip file"
-            exit 1
-          }
-
       - name: Log build info
         shell: bash
         run: |
@@ -108,13 +87,13 @@ jobs:
           echo "  Platform: ${{ env.PLATFORM }}"
           echo "  Architecture: ${{ env.ARCH }}"
           echo "  App Name: ${{ env.APP_NAME }}"
-          ls -lh "${{ env.APP_NAME }}-portable-${{ env.PLATFORM }}-${{ env.ARCH }}.zip" || echo "⚠ Zip file not found"
+          ls -lh "packages/electron/dist/${{ env.APP_NAME }}" || echo "⚠ Build directory not found"
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ env.APP_NAME }}-portable-${{ env.PLATFORM }}-${{ env.ARCH }}
-          path: ${{ env.APP_NAME }}-portable-${{ env.PLATFORM }}-${{ env.ARCH }}.zip
+          path: packages/electron/dist/${{ env.APP_NAME }}
           retention-days: 7
           if-no-files-found: error
 
