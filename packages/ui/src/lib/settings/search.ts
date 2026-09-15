@@ -33,6 +33,12 @@ interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
 
 const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   {
+    id: 'chat.activity-default',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.section.activityDefault',
+    keywords: ['activity', 'collapsed', 'expanded', 'live', 'tools', 'history'],
+  },
+  {
     id: 'appearance.language',
     page: 'appearance',
     titleKey: 'settings.appearance.language.label',
@@ -74,6 +80,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     // Exactly matches the render guard in OpenChamberVisualSettings: any darwin
     // Electron shell (isMac already implies isDesktopShell), local or remote host.
     isAvailable: (ctx) => ctx.isMac,
+  },
+  {
+    id: 'appearance.scrollbars',
+    page: 'appearance',
+    titleKey: 'settings.openchamber.visual.field.alwaysShowScrollbars',
+    descriptionKey: 'settings.openchamber.visual.field.alwaysShowScrollbarsHint',
+    keywords: ['scrollbar', 'scrollbars', 'scroll', 'mouse', 'wheel', 'accessibility', 'always visible'],
   },
   {
     id: 'appearance.pwa-install-name',
@@ -386,7 +399,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.enterToSend',
     descriptionKey: 'settings.openchamber.visual.field.enterToSendHint',
-    keywords: ['enter', 'shift enter', 'send', 'newline'],
+    keywords: ['enter', 'shift enter', 'ctrl enter', 'cmd enter', 'mod enter', 'send', 'newline'],
   },
   {
     id: 'sessions.default-model',
@@ -432,6 +445,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.sessionRetention.field.enableAutoCleanup',
     descriptionKey: 'settings.openchamber.sessionRetention.tooltip',
     keywords: ['retention', 'archive', 'delete'],
+  },
+  {
+    id: 'sessions.retention-only-archived',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.sessionRetention.field.onlyArchived',
+    descriptionKey: 'settings.openchamber.sessionRetention.field.onlyArchivedDescription',
+    keywords: ['archive', 'archived', 'only', 'delete', 'cleanup', 'retention'],
   },
   {
     id: 'sessions.retention-period',
@@ -627,6 +647,26 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'projects',
     titleKey: 'settings.openchamber.worktrees.setup.waitForCommands',
     keywords: ['worktree', 'setup commands', 'bootstrap', 'wait'],
+  },
+  {
+    id: 'projects.worktree.setup.replace',
+    page: 'projects',
+    titleKey: 'settings.projects.shared.replaceMode',
+    keywords: ['worktree', 'setup commands', 'shared', 'team', 'only mine'],
+  },
+  {
+    id: 'projects.shared',
+    page: 'projects',
+    titleKey: 'settings.projects.shared.title',
+    descriptionKey: 'settings.projects.shared.description',
+    keywords: ['shared', 'team', 'repository', '.openchamber', 'project.json', 'trust'],
+  },
+  {
+    id: 'projects.shared.plansDir',
+    page: 'projects',
+    titleKey: 'settings.projects.shared.plansDir',
+    descriptionKey: 'settings.projects.shared.plansDirInfo',
+    keywords: ['plans', 'folder', 'shared', 'team', 'docs'],
   },
   {
     id: 'remote-instances.client-auth',
@@ -1038,6 +1078,29 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     descriptionKey: 'settings.integrations.linear.mapping.defaultProject.info',
     keywords: ['linear', 'project', 'team', 'map', 'workspace', 'directory'],
     isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'integrations.guests',
+    page: 'integrations',
+    titleKey: 'settings.integrations.guests.title',
+    descriptionKey: 'settings.integrations.guests.info',
+    keywords: ['guest', 'extension', 'oauth', 'clickup', 'gitlab', 'panel', 'connect'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'extensions.add',
+    page: 'extensions',
+    titleKey: 'settings.extensions.add.label',
+    descriptionKey: 'settings.extensions.add.info',
+    keywords: ['folder', 'path', 'zip', 'git', 'url', 'install', 'guest', 'panel'],
+    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
+  },
+  {
+    id: 'extensions.updates.check',
+    page: 'extensions',
+    titleKey: 'settings.extensions.updates.check',
+    keywords: ['update', 'upgrade', 'version', 'git', 'extension', 'guest', 'refresh'],
+    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
   },
 ] as const;
 

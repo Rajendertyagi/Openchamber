@@ -10,7 +10,7 @@ import {
 import { sanitizeTerminalHistoryChunk } from './history.js';
 import { consumeTerminalThemeQueries, terminalThemeModeReport } from './theme-response.js';
 import { buildTerminalShellLaunch, createTerminalShellResolver, normalizeTerminalShell } from './shells.js';
-import { stripAppImageArgv0Leak, resolveLinuxPtyLaunch } from '../inherited-env.js';
+import { stripAppImageArgv0Leak, resolvePosixPtyLaunch } from '../inherited-env.js';
 
 const MAX_SESSIONS = 20;
 const MAX_HISTORY_BYTES = 512 * 1024;
@@ -100,6 +100,7 @@ export function createTerminalRuntime({
   const pendingTerminations = new Set();
   const runtime = typeof globalThis.Bun === 'undefined' ? 'node' : 'bun';
   let ptyProviderPromise = null;
+  let shutdownPromise = null;
   let wsServer = new WebSocketServer({ noServer: true, maxPayload: TERMINAL_WS_MAX_PAYLOAD_BYTES });
   const shellResolver = createTerminalShellResolver({ fs, path, searchPathFor, isExecutable, buildAugmentedPath });
 
@@ -123,15 +124,16 @@ export function createTerminalRuntime({
     for (const executable of resolvedShell.executables) {
       try {
         const env = { ...process.env, PATH: buildAugmentedPath(), TERM: 'xterm-256color', COLORTERM: 'truecolor', COLORFGBG: themeMode === 'light' ? '0;15' : '15;0' };
-        // The daemon's IPC fd is closed inside the PTY. An explicit override is
-        // required because bun-pty also inherits Bun's native process environment.
-        env.NODE_CHANNEL_FD = '';
+        // The daemon's IPC fd is closed inside the PTY; an inherited NODE_CHANNEL_FD
+        // (even an empty one) makes Node CLIs warn about an unparsable IPC channel.
+        delete env.NODE_CHANNEL_FD;
         delete env.BASH_XTRACEFD; delete env.BASH_ENV; delete env.ENV; delete env.ELECTRON_RUN_AS_NODE;
         // AppImage exports ARGV0; zsh would otherwise rewrite argv[0] for every command (#2588).
-        // bun-pty also merges the native OS environ, so wrap with `env -u ARGV0` on Linux.
         stripAppImageArgv0Leak(env);
         const shellLaunch = buildTerminalShellLaunch(executable, { mode, command, loginShell });
-        const launch = resolveLinuxPtyLaunch(shellLaunch.executable, shellLaunch.args);
+        // bun-pty merges the native OS environ back in, so the POSIX launch is
+        // wrapped with `env -u` for the variables deleted above.
+        const launch = resolvePosixPtyLaunch(shellLaunch.executable, shellLaunch.args);
         const options = { name: 'xterm-256color', cwd, cols, rows, env };
         if (process.platform === 'win32') options.useConpty = true;
         return { process: await provider.spawn(launch.executable, launch.args, options), backend: provider.backend, shell: resolvedShell.id, loginShell };
@@ -184,6 +186,10 @@ export function createTerminalRuntime({
 
   const snapshot = (session) => ({
     t: 'snapshot', v: 3, s: session.id, q: session.sequence, history: session.history,
+    // The PTY size the history was drawn for: a client replays history at this
+    // size before fitting its own viewport, so shell output wrapped for one
+    // width never gets re-laid-out at another.
+    cols: session.cols, rows: session.rows,
     status: session.status, exitCode: session.exitCode, signal: session.signal,
     mode: session.mode ?? INTERACTIVE_TERMINAL_MODE, purpose: getSessionPurpose(session),
     runtime, ptyBackend: session.backend,
@@ -277,6 +283,7 @@ export function createTerminalRuntime({
   };
 
   const createSession = async ({ sessionId, cwd, cols = 80, rows = 24, themeMode, terminalBackground, terminalForeground, shell = 'auto', loginShell = false, mode, command, purpose }) => {
+    if (shutdownPromise) throw new Error('Terminal runtime is shutting down');
     if (!validateSize(cols, 1000) || !validateSize(rows, 500)) throw new Error('Invalid terminal dimensions');
     if (typeof loginShell !== 'boolean') throw new Error('Invalid terminal login mode');
     const normalizedShell = normalizeTerminalShell(shell);
@@ -502,10 +509,15 @@ export function createTerminalRuntime({
     const previousRestart = pendingSessionRestarts.get(session.id) ?? Promise.resolve();
     const restart = previousRestart.catch(() => {}).then(async () => {
       await validateCwd(cwd);
+      if (shutdownPromise || sessions.get(session.id) !== session) throw new Error('Terminal session was closed during restart');
       if (!validateSize(cols, 1000) || !validateSize(rows, 500)) throw new Error('Invalid terminal dimensions');
       if (typeof loginShell !== 'boolean') throw new Error('Invalid terminal login mode');
       const oldProcess = session.process;
       const spawned = await spawnPty({ cwd, cols, rows, themeMode, shell, loginShell });
+      if (shutdownPromise || sessions.get(session.id) !== session) {
+        await terminateProcess(spawned.process, true);
+        throw new Error('Terminal session was closed during restart');
+      }
       session.process = spawned.process; session.backend = spawned.backend; session.shell = spawned.shell; session.loginShell = spawned.loginShell; session.cwd = cwd; session.cols = cols; session.rows = rows;
       session.history = ''; session.pendingHistoryControlSequence = ''; session.pendingThemeControlSequence = ''; session.themeModeEnabled = false; session.status = 'running'; session.exitCode = null; session.signal = null; session.eventQueue.length = 0;
       session.themeMode = themeMode === 'light' ? 'light' : 'dark'; session.terminalBackground = terminalBackground; session.terminalForeground = terminalForeground;
@@ -555,9 +567,13 @@ export function createTerminalRuntime({
     }
   }, 5 * 60 * 1000);
 
-  const shutdown = async () => {
+  const stop = async () => {
     server.off('upgrade', upgradeHandler); clearInterval(idleSweep);
-    await Promise.allSettled([...pendingSessionRestarts.values()]);
+    for (const pending of pendingSessionCreates.values()) pending.cancelled = true;
+    await Promise.allSettled([
+      ...[...pendingSessionCreates.values()].map((pending) => pending.promise),
+      ...pendingSessionRestarts.values(),
+    ]);
     for (const session of sessions.values()) void terminateProcess(session.process, true);
     sessions.clear();
     await Promise.allSettled([...pendingTerminations]);
@@ -568,6 +584,10 @@ export function createTerminalRuntime({
       new Promise((resolve) => setTimeout(resolve, 1000)),
     ]);
     wsServer = null;
+  };
+  const shutdown = () => {
+    if (!shutdownPromise) shutdownPromise = stop();
+    return shutdownPromise;
   };
   return { shutdown };
 }
