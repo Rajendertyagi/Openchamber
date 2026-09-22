@@ -33,7 +33,7 @@ jobs:
       - name: Setup Bun (force 2.4.0)
         uses: oven-sh/setup-bun@v2
         with:
-          version: ${{ env.BUN_VERSION }}
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Verify Bun version
         shell: bash
@@ -95,18 +95,38 @@ jobs:
         run: |
           Stop-Process -Name "OpenChamber" -Force -ErrorAction SilentlyContinue
           Stop-Process -Name "opencode" -Force -ErrorAction SilentlyContinue
-          Start-Sleep -Seconds 2
+          Start-Sleep -Seconds 5
 
       - name: Rename build output
         shell: bash
         run: |
-          if [ -d "packages/electron/dist/${{ env.PLATFORM }}-unpacked" ]; then
-            mv "packages/electron/dist/${{ env.PLATFORM }}-unpacked" "packages/electron/dist/${{ env.APP_NAME }}"
-            echo "✓ Build output renamed successfully"
-          else
-            echo "⚠ Build directory not found"
+          SRC="packages/electron/dist/${{ env.PLATFORM }}-unpacked"
+          DST="packages/electron/dist/${{ env.APP_NAME }}"
+
+          if [ ! -d "$SRC" ]; then
+            echo "⚠ Expected build directory not found: $SRC"
+            echo "Contents of packages/electron/dist:"
+            ls -la packages/electron/dist || true
             exit 1
           fi
+
+          rm -rf "$DST"
+
+          for attempt in 1 2 3 4 5; do
+            if mv "$SRC" "$DST" 2>/tmp/mv-error.log; then
+              echo "✓ Build output renamed successfully (attempt $attempt)"
+              exit 0
+            fi
+            echo "⚠ mv failed (attempt $attempt):"
+            cat /tmp/mv-error.log || true
+            echo "Retrying in 5s (Windows file locks can take a moment to release)..."
+            sleep 5
+          done
+
+          echo "✗ Failed to rename build output after 5 attempts"
+          echo "Contents of packages/electron/dist:"
+          ls -la packages/electron/dist || true
+          exit 1
 
       - name: Verify build artifacts exist
         shell: pwsh
