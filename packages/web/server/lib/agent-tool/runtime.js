@@ -79,6 +79,7 @@ const ALL_PARAMETER_PROPERTIES = {
   cron: { type: 'string', description: 'Cron expression' },
   timezone: { type: 'string', description: 'IANA timezone' },
   disabled: { type: 'boolean', description: 'true disables and false enables; required for schedule.toggle' },
+  path: { type: 'string', description: 'File to show for file.open; absolute, or relative to the session directory' },
   url: { type: 'string', description: 'http(s) URL for browser.open' },
   selector: { type: 'string', description: 'CSS selector from a browser.snapshot result' },
   text: { type: 'string', description: 'Visible label to match when no selector is given' },
@@ -205,7 +206,7 @@ const createToolEntry = ({ name, description, definitions, parameters }) => Stri
               authorization: "Bearer " + token,
               "content-type": "application/json",
             },
-            body: JSON.stringify({ input: args, contextDirectory: context.directory, tool: ${JSON.stringify(name)} }),
+            body: JSON.stringify({ input: args, contextDirectory: context.directory, contextSessionId: context.sessionID, tool: ${JSON.stringify(name)} }),
             signal: context.abort,
           })
           const output = await response.text()
@@ -358,7 +359,10 @@ export const createAgentToolRuntime = (dependencies) => {
       return createResult({ ok: false, action, error: { message: 'OpenChamber control service is unavailable', kind: 'runtime' } });
     }
     try {
-      const data = await executeAction(action, { ...payload.input, action }, payload.contextDirectory, options);
+      const contextSessionId = asNonEmptyString(payload.contextSessionId);
+      const data = await executeAction(action, { ...payload.input, action }, payload.contextDirectory, contextSessionId
+        ? { ...options, contextSessionId }
+        : options);
       return createResult({ ok: true, action, data });
     } catch (error) {
       return createResult({

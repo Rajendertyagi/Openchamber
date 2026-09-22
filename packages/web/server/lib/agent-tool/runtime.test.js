@@ -53,6 +53,7 @@ describe('agent tool action allowlist', () => {
     'schedule.run',
     'schedule.delete',
     'schedule.toggle',
+    'file.open',
   ])('delegates %s to the shared control service', async (action) => {
     const { runtime, executeAction } = await createRuntime();
     const input = { action, projectId: 'project-1' };
@@ -131,6 +132,8 @@ describe('managed agent tool runtime', () => {
     expect(Object.keys(tool.openchamber_web.args.parameters.properties)).toContain('url');
     expect(Object.keys(tool.openchamber.args.parameters.properties)).not.toContain('url');
     expect(Object.keys(tool.openchamber.args.parameters.properties)).toContain('sessionId');
+    expect(Object.keys(tool.openchamber.args.parameters.properties)).toContain('path');
+    expect(Object.keys(tool.openchamber_web.args.parameters.properties)).not.toContain('path');
   });
 
   it('keeps the action schema to one validator keyword', async () => {
@@ -261,6 +264,7 @@ describe('managed agent tool runtime', () => {
     const result = await runtime.execute({
       input: { action: 'read', title: 'Uses bun' },
       contextDirectory: '/work/project',
+      contextSessionId: 'ses_1',
       tool: 'openchamber_memory',
     });
 
@@ -270,7 +274,7 @@ describe('managed agent tool runtime', () => {
       'memory.read',
       { action: 'memory.read', title: 'Uses bun' },
       '/work/project',
-      {},
+      { contextSessionId: 'ses_1' },
     );
   });
 

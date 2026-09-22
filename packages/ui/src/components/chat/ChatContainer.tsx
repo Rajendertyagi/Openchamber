@@ -5,6 +5,7 @@ import type { QuestionRequest } from '@/types/question';
 
 import { ChatInput } from './ChatInput';
 import { ChatColumnSessionContext, type ChatColumnSession } from './chatColumnSession';
+import { MobileCommentComposerContext, useMobileCommentComposerOwner } from './composer/comment/MobileCommentComposerContext';
 import { DraftPresetChips } from './DraftPresetChips';
 import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
@@ -34,6 +35,8 @@ const FLOATING_COMPOSER_DEFAULT_HEIGHT = 128;
 // for this many consecutive frames, or after the cap.
 const TIMELINE_SETTLE_STABLE_FRAMES = 2;
 const TIMELINE_SETTLE_CAP_MS = 300;
+// Mirrors the oc-chat-hydration-reveal duration in index.css.
+const TIMELINE_REVEAL_FADE_MS = 100;
 import { PermissionCard } from './PermissionCard';
 import { QuestionCard } from './QuestionCard';
 import { hasActiveQuestionToolInCurrentTurn, recoverPendingQuestionWithRetry } from '@/sync/question-recovery';
@@ -63,6 +66,7 @@ import {
     useSessionMessageCount,
     useSessionMessageRecords,
     useSessionMessageLoadState,
+    useSessionMessageLoader,
     useSyncDirectory,
     useSessionRenderable,
     useSessionStatus,
@@ -74,7 +78,6 @@ import {
 import { useSync } from '@/sync/use-sync';
 import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { useI18n } from '@/lib/i18n';
-import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { WorkStatusPanel } from './work-status/WorkStatusPanel';
 import { useWorkStatusVisibility } from './work-status/useWorkStatusVisibility';
@@ -431,6 +434,7 @@ const ChatViewport = React.memo(({
         let finished = false;
         let timer: number | null = null;
         let frame: number | null = null;
+        let fadeTimer: number | null = null;
         // Revealed once the geometry has settled: after the last hold the
         // list still lays rows out from its own measurements over a few
         // frames, so the timeline stays hidden — pinned to the end on every
@@ -461,8 +465,28 @@ const ChatViewport = React.memo(({
                     frame = window.requestAnimationFrame(settle);
                     return;
                 }
-                if (fade) root.setAttribute('data-timeline-reveal', 'fading');
-                else root.removeAttribute('data-timeline-reveal');
+                if (!fade) {
+                    root.removeAttribute('data-timeline-reveal');
+                    return;
+                }
+                root.setAttribute('data-timeline-reveal', 'fading');
+                // The fade is a filled opacity animation, and a filled
+                // animation keeps the root a stacking context for as long
+                // as the attribute stays. That would trap the overlay
+                // scrollbar (z-30) under the composer slot (z-10): the thumb
+                // paints over the composer band but cannot be grabbed there.
+                // Drop the attribute once the fade has run (or immediately
+                // under reduced motion, where the animation never fires).
+                const clearFade = (event?: AnimationEvent) => {
+                    // Child entrance animations bubble here too.
+                    if (event && event.target !== root) return;
+                    if (fadeTimer !== null) window.clearTimeout(fadeTimer);
+                    fadeTimer = null;
+                    root.removeEventListener('animationend', clearFade);
+                    root.removeAttribute('data-timeline-reveal');
+                };
+                root.addEventListener('animationend', clearFade);
+                fadeTimer = window.setTimeout(clearFade, TIMELINE_REVEAL_FADE_MS * 2);
             };
             frame = window.requestAnimationFrame(settle);
         };
@@ -483,6 +507,7 @@ const ChatViewport = React.memo(({
             finished = true;
             if (timer !== null) window.clearTimeout(timer);
             if (frame !== null) window.cancelAnimationFrame(frame);
+            if (fadeTimer !== null) window.clearTimeout(fadeTimer);
             revealGate.onEmpty = null;
         };
     }, [revealGate, scrollRef]);
@@ -767,9 +792,16 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     const sync = useSync();
     const syncDirectory = useSyncDirectory();
     const effectiveSessionDirectory = currentSessionDirectory ?? syncDirectory;
+    const messageLoader = useSessionMessageLoader();
     const currentSessionKey = currentSessionId
         ? JSON.stringify([getRuntimeKey(), effectiveSessionDirectory, currentSessionId])
         : null;
+    // A deferred switch can keep the previous transcript on screen after the
+    // selected session changes. Protect what is actually rendered until commit.
+    React.useLayoutEffect(() => {
+        if (!currentSessionKey || !currentSessionId || !effectiveSessionDirectory) return;
+        return messageLoader.retainSessionHistory({ directory: effectiveSessionDirectory, sessionID: currentSessionId }, 'rendered');
+    }, [currentSessionKey, currentSessionId, effectiveSessionDirectory, messageLoader]);
     // One gate per opened session; the scroll hook holds it until the
     // viewport is pinned to the end so the first visible frame is already
     // at the bottom.
@@ -782,6 +814,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         () => ({ sessionId: currentSessionId ?? null, directory: currentSessionId ? effectiveSessionDirectory ?? null : null }),
         [currentSessionId, effectiveSessionDirectory],
     );
+    const mobileCommentComposer = useMobileCommentComposerOwner();
     const ensureSessionRenderable = React.useCallback(
         (sessionId: string) => sync.ensureSessionRenderable(sessionId, false, effectiveSessionDirectory),
         [effectiveSessionDirectory, sync],
@@ -1186,10 +1219,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         goToBottom('instant');
     }, [goToBottom]);
 
-    // Mobile loads older history via an explicit top button instead of a
-    // scroll-position trigger (see handleHistoryScroll in the controller).
-    const showLoadOlderButton = isMobileSurfaceRuntime()
-        && timelineController.historySignals.canLoadEarlier;
+    // A window too short to scroll must stay manually pageable on every runtime.
+    const showLoadOlderButton = timelineController.historySignals.canLoadEarlier;
     const timelineLoadEarlier = timelineController.loadEarlier;
     const handleLoadOlderClick = React.useCallback(() => {
         // Loading older history is an explicit move INTO the past: release
@@ -1627,6 +1658,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 	return (
 		<div ref={workStatusRowRef} className="flex h-full min-h-0 bg-background">
 		<ChatColumnSessionContext.Provider value={chatColumnSession}>
+		{/* One mobile comment controller per column: selections in this column
+		    comment into this column's composer, never a sibling's. */}
+		<MobileCommentComposerContext.Provider value={mobileCommentComposer}>
 		<div data-composer-bound className="relative flex min-w-0 flex-1 flex-col h-full bg-background">
 			{returnToParentButton}
 			{sessionSurface}
@@ -1747,6 +1781,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 onLoadEarlier={handleLoadOlderClick}
             />
         </div>
+        </MobileCommentComposerContext.Provider>
         </ChatColumnSessionContext.Provider>
         {/* Kept mounted while it could ever show, so it can animate its own
             collapse; `visible` drives that. Unmounting on the spot is what made
