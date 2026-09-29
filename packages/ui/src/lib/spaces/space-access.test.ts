@@ -13,6 +13,7 @@ const entry = (change: Partial<SpaceEntry> = {}): SpaceEntry => ({
   projectDirectory: '/home/me/app',
   directory: '/spaces/a1b2c3d4e5f6/app',
   state: 'running',
+  stoppedIdle: false,
   step: null,
   failure: null,
   network: { mode: 'allowlist', domains: [] },
@@ -20,6 +21,7 @@ const entry = (change: Partial<SpaceEntry> = {}): SpaceEntry => ({
   access: 'granted',
   needsAccess: [],
   damage: null,
+  setup: null,
   ...change,
 });
 

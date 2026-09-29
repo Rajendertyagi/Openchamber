@@ -134,10 +134,16 @@
     "agentNotifyToolEnabled": {
       "scope": "instance"
     },
+    "agentToolsCodeMode": {
+      "scope": "instance"
+    },
     "agentMemoryToolEnabled": {
       "scope": "instance"
     },
     "isolatedSpacesEnabled": {
+      "scope": "instance"
+    },
+    "isolatedSpacesIdleStop": {
       "scope": "instance"
     },
     "agentMemoryFeatureAvailable": {
