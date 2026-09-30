@@ -42,6 +42,12 @@ type SpaceCreationAccess = { kind: 'giving' } | { kind: 'failed'; failures: read
 /** The actions on a space the user can take from its group, from soft to hard; `setup` runs the project's setup commands again. */
 export type SpaceAction = 'start' | 'stop' | 'restart_opencode' | 'restart' | 'setup' | 'remove';
 
+/**
+ * Chats a delete could not save to the Archive page: the titles of those too large to save and
+ * how many others failed. The confirmation asks again, with "Delete anyway".
+ */
+export type SpaceUnsavedChats = { tooLarge: readonly string[]; failed: number };
+
 /** An action this window started on a space: under way, or failed with the server's reason. */
 export type SpaceActionState =
   | { kind: 'running'; action: SpaceAction }
@@ -84,10 +90,19 @@ type SpacesState = {
   /** The action under way or failed per space, in this window, for the group's status line and menu. */
   actions: ReadonlyMap<string, SpaceActionState>;
   noteAction: (spaceId: string, state: SpaceActionState | null) => void;
+  /** The apply dialog, open on one space. */
+  applyDialog: string | null;
+  openApplyDialog: (spaceId: string) => void;
+  closeApplyDialog: () => void;
   /** The confirmation before a space is deleted, open on one space. */
   deleteDialog: string | null;
-  openDeleteDialog: (spaceId: string) => void;
+  /** Set when the confirmation opened again because the space's chats could not be saved. */
+  deleteUnsaved: SpaceUnsavedChats | null;
+  openDeleteDialog: (spaceId: string, unsaved?: SpaceUnsavedChats | null) => void;
   closeDeleteDialog: () => void;
+  /** The name of a space whose chats just went to the Archive page, for the notice that says so. */
+  archivedNotice: string | null;
+  noteChatsArchived: (name: string | null) => void;
   /** The window with the end of a failed setup command's output, open on one space. */
   setupOutputDialog: string | null;
   openSetupOutputDialog: (spaceId: string) => void;
@@ -184,9 +199,15 @@ export const useSpacesStore = create<SpacesState>((set, get) => ({
     else actions.delete(spaceId);
     return { actions };
   }),
+  applyDialog: null,
+  openApplyDialog: (spaceId) => set({ applyDialog: spaceId }),
+  closeApplyDialog: () => set({ applyDialog: null }),
   deleteDialog: null,
-  openDeleteDialog: (spaceId) => set({ deleteDialog: spaceId }),
-  closeDeleteDialog: () => set({ deleteDialog: null }),
+  deleteUnsaved: null,
+  openDeleteDialog: (spaceId, unsaved = null) => set({ deleteDialog: spaceId, deleteUnsaved: unsaved }),
+  closeDeleteDialog: () => set({ deleteDialog: null, deleteUnsaved: null }),
+  archivedNotice: null,
+  noteChatsArchived: (name) => set({ archivedNotice: name }),
   setupOutputDialog: null,
   openSetupOutputDialog: (spaceId) => set({ setupOutputDialog: spaceId }),
   closeSetupOutputDialog: () => set({ setupOutputDialog: null }),
@@ -220,7 +241,7 @@ export const useSpacesStore = create<SpacesState>((set, get) => ({
   resetForRuntimeSwitch: () => {
     progressAt.clear();
     journeyGeneration += 1;
-    set({ spaces: EMPTY, journey: null, progressRevision: 0, creationAccess: new Map(), accessDialog: null, actions: new Map(), deleteDialog: null, setupOutputDialog: null, actionsSheet: null });
+    set({ spaces: EMPTY, journey: null, progressRevision: 0, creationAccess: new Map(), accessDialog: null, actions: new Map(), applyDialog: null, deleteDialog: null, deleteUnsaved: null, archivedNotice: null, setupOutputDialog: null, actionsSheet: null });
   },
   forgetForSwitchOff: () => get().resetForRuntimeSwitch(),
 }));

@@ -34,7 +34,7 @@ afterEach(() => {
 });
 
 /** A journey on fresh stand-ins. `failAt` names a stand-in step that rejects. */
-const journeyWith = ({ failAt = null, place = createMemoryPlace(), projects = [PROJECT], historyStatus = 'sent', holdCodeIn = false, holdCodeOut = false, holdIdleSave = false, hostEnvironment = {}, dataDir = null } = {}) => {
+const journeyWith = ({ failAt = null, place = createMemoryPlace(), projects = [PROJECT], historyStatus = 'sent', holdCodeIn = false, holdCodeOut = false, holdIdleSave = false, hostEnvironment = {}, dataDir = null, archiveChats = null } = {}) => {
   // With `holdCodeIn`, code in waits until the test lets it go, so a creation stays under way;
   // `holdCodeOut` does the same for the fetch of an apply.
   let releaseCodeIn = () => {};
@@ -91,6 +91,7 @@ const journeyWith = ({ failAt = null, place = createMemoryPlace(), projects = [P
   const journey = createSpaceJourney({
     manager, place, gatekeeper, codeIn, codeOut, records, spaceOpenCode, serverInside, restartOpenCodeInside,
     listProjectDirectories: async () => projects,
+    archiveChats,
     readHostSecret: (name) => hostEnvironment[name],
     readIdleStop: async () => idle.saved ?? { enabled: true, hours: 4 },
     saveIdleStop: async (setting) => { if (holdIdleSave) await idleSaveHeld; fail('saveIdleStop'); idle.saved = setting; },
@@ -150,7 +151,7 @@ describe('the journey: create', () => {
     expect(await journey.listSpaces()).toEqual([expect.objectContaining({ id, state: 'failed', step: 'failed', failure: expect.objectContaining({ code: `${failAt}_failed` }) })]);
 
     // The failure is dismissed by removing it; the place is not asked, there is nothing there.
-    expect(await journey.removeSpace(id)).toEqual({ id, removed: true, refsRemoved: null, failures: [] });
+    expect(await journey.removeSpace(id)).toEqual({ id, removed: true, refsRemoved: null, failures: [], chats: null });
     expect(await journey.listSpaces()).toEqual([]);
   });
 
@@ -236,7 +237,7 @@ describe('the journey: start, stop, remove', () => {
 
   it('removes the space, the refs in the user\'s repository and the record', async () => {
     const { journey, place, records, calls, id } = await ready();
-    expect(await journey.removeSpace(id)).toEqual({ id, removed: true, refsRemoved: true, failures: [] });
+    expect(await journey.removeSpace(id)).toEqual({ id, removed: true, refsRemoved: true, failures: [], chats: null });
     expect(calls).toEqual([['removeSpaceRefs', { repository: PROJECT, spaceId: id }]]);
     expect(await place.list()).toEqual([]);
     expect(records.read(id).status).toBe('missing');
@@ -685,6 +686,15 @@ describe('the journey: journal and apply', () => {
     ]);
   });
 
+  it('refuses to preview or apply a stopped space with its own code, before reaching into it', async () => {
+    const { journey, id, calls } = await ready();
+    await journey.stopSpace(id);
+    calls.splice(0);
+    await expect(journey.previewApply(id)).rejects.toMatchObject({ code: 'space_not_running' });
+    await expect(journey.applySpace(id, { as: 'changes' })).rejects.toMatchObject({ code: 'space_not_running' });
+    expect(calls).toEqual([]);
+  });
+
   it('applies as a branch, then removes the space when asked, and only after the apply went through', async () => {
     const { journey, place, id, calls } = await ready();
     const outcome = await journey.applySpace(id, { as: 'branch', branch: 'space/fix-login', removeAfterwards: true });
@@ -835,8 +845,9 @@ describe('the journey: idle stop', () => {
     expect(quietStops).toEqual([]);
 
     const held = await ready({ holdCodeOut: true });
-    const heldStops = idleStopped(held.place);
+    // The preview takes the lock while the space still runs; the idle stop comes during it.
     const apply = held.journey.previewApply(held.id);
+    const heldStops = idleStopped(held.place);
     await held.journey.listSpaces();
     await sleep(20);
     expect(heldStops).toEqual([]);
@@ -915,7 +926,7 @@ describe('the journey: setup commands', () => {
     const mine = events.filter((event) => event.spaceId === id);
     expect(mine.findIndex((event) => event.step === 'ready')).toBeLessThan(mine.findIndex((event) => event.step === undefined));
     const listed = (await journey.listSpaces()).find((space) => space.id === id);
-    expect(listed.setup).toEqual({ state: 'failed', index: 1, total: 3, command: 'npm ci', exitCode: 1, timedOut: false });
+    expect(listed.setup).toEqual({ state: 'failed', index: 1, total: 3, command: 'npm ci', exitCode: 1, timedOut: false, startedAt: '2026-09-26T10:00:00.000Z', finishedAt: '2026-09-26T10:00:00.000Z' });
     expect(await journey.readSetup(id)).toEqual({ setup: listed.setup, output: 'npm ERR! 403 Forbidden' });
     expect(setupEvents(events, id).length).toBeGreaterThanOrEqual(2);
   });
@@ -967,5 +978,71 @@ describe('the journey: setup commands', () => {
     // Another process on the same data: it has no run in its memory.
     const second = journeyWith({ place, dataDir: first.dataDir });
     expect((await second.journey.listSpaces()).find((space) => space.id === id).setup).toEqual({ state: 'interrupted', total: 2 });
+  });
+});
+
+describe('the journey: the chat archive of a deleted space', () => {
+  // A stand-in archive that records what it was asked and the state of the space at that moment.
+  const archiveWith = (place, answer) => {
+    const asked = [];
+    const archiveChats = async (request) => {
+      asked.push({ ...request, stateThen: (await place.list()).find((space) => space.id === request.spaceId)?.state });
+      if (answer instanceof Error) throw answer;
+      return answer;
+    };
+    return { asked, archiveChats };
+  };
+  const ready = async (answer = { saved: 2, tooLarge: [], failed: 0, listed: true }) => {
+    const place = createMemoryPlace();
+    const archive = archiveWith(place, answer);
+    const made = journeyWith({ place, archiveChats: archive.archiveChats });
+    const { id } = await made.journey.createSpace(REQUEST);
+    await until(() => steps(made.events, id).includes('ready'));
+    await until(() => made.records.read(id).record?.history !== 'pending');
+    made.calls.splice(0);
+    return { ...made, ...archive, id };
+  };
+  const notSaved = () => new SpaceError('chats_not_saved', 'The chats of "Fix login" could not be saved.', { name: 'Fix login', tooLarge: ['Big one'], failed: 0, listed: true });
+
+  it('saves the chats of a running space before it goes, and says how many', async () => {
+    const { journey, place, asked, calls, id } = await ready();
+    const outcome = await journey.removeSpace(id);
+    expect(asked).toEqual([{ spaceId: id, name: 'Fix login', projectDirectory: PROJECT, running: true, allowUnsaved: false, stateThen: 'running' }]);
+    expect(outcome).toEqual({ id, removed: true, refsRemoved: true, failures: [], chats: { saved: 2, tooLarge: [], failed: 0, listed: true } });
+    expect(calls.map(([name]) => name)).toEqual(['removeSpaceRefs']);
+    expect(await place.list()).toEqual([]);
+  });
+
+  it('starts a stopped space to take its chats', async () => {
+    const { journey, asked, id } = await ready();
+    await journey.stopSpace(id);
+    await journey.removeSpace(id);
+    expect(asked).toEqual([expect.objectContaining({ running: true, stateThen: 'running' })]);
+  });
+
+  it('deletes nothing when the chats cannot all be saved, and deletes anyway when the user says so', async () => {
+    const { journey, place, records, calls, asked, id } = await ready(notSaved());
+    await expect(journey.removeSpace(id)).rejects.toMatchObject({ code: 'chats_not_saved', details: { tooLarge: ['Big one'] } });
+    expect(await place.list()).toEqual([expect.objectContaining({ id })]);
+    expect(records.read(id).status).toBe('ok');
+    expect(calls).toEqual([]);
+    await expect(journey.removeSpace(id, { allowUnsaved: true })).rejects.toMatchObject({ code: 'chats_not_saved' });
+    expect(asked.map((request) => request.allowUnsaved)).toEqual([false, true]);
+  });
+
+  it('stops a stopped space again when it was started for its chats and they could not be saved', async () => {
+    const { journey, place, id } = await ready(notSaved());
+    await journey.stopSpace(id);
+    await expect(journey.removeSpace(id)).rejects.toMatchObject({ code: 'chats_not_saved' });
+    expect((await place.list()).find((space) => space.id === id)?.state).toBe('exited');
+  });
+
+  it('keeps a space asked to go after an apply when its chats cannot be saved, with the work applied', async () => {
+    const { journey, place, id } = await ready(notSaved());
+    const outcome = await journey.applySpace(id, { as: 'branch', branch: 'space/fix-login', removeAfterwards: true });
+    expect(outcome.applied).toMatchObject({ status: 'applied', branch: 'space/fix-login' });
+    expect(outcome.removal).toBeNull();
+    expect(outcome.kept).toMatchObject({ code: 'chats_not_saved' });
+    expect(await place.list()).toEqual([expect.objectContaining({ id })]);
   });
 });
