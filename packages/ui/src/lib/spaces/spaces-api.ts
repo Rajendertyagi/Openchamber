@@ -133,6 +133,10 @@ const spaceEntrySchema = z.object({
   name: z.string(),
   projectDirectory: z.string().nullable(),
   directory: z.string().nullable(),
+  // The folder the space was made for, on the host, which a space whose project is no longer
+  // registered still names; `found` is whether it is there now, null when not looked at. A host
+  // before 5e-3 names none.
+  projectFolder: z.object({ path: z.string().nullable(), found: z.boolean().nullable() }).default({ path: null, found: null }),
   state: z.enum(['preparing', 'running', 'exited', 'missing', 'failed']),
   // A stopped space that stopped itself after the idle hours, rather than by a hand or a crash.
   stoppedIdle: z.boolean().default(false),
@@ -153,7 +157,7 @@ const spaceEntrySchema = z.object({
 export type SpaceEntry = z.infer<typeof spaceEntrySchema>;
 
 const placeSchema = z.union([
-  z.object({ id: z.string(), available: z.literal(true), hostIsolation: z.boolean() }),
+  z.object({ id: z.string(), available: z.literal(true), hostIsolation: z.boolean(), version: z.string().default('') }),
   z.object({ id: z.string(), available: z.literal(false), code: z.string(), message: z.string() }),
 ]);
 
@@ -207,6 +211,34 @@ export const setSpacesSwitch = (enabled: boolean): Promise<SpacesSwitchChange> =
 
 export const listSpacePlaces = async (signal?: AbortSignal): Promise<SpacePlace[]> =>
   (await request(`${SPACES_ROUTE}/places`, z.object({ places: z.array(placeSchema) }), { signal })).places;
+
+// The disk a place's spaces take, in bytes: the image (null when it is not there), the tools and
+// the spaces' own volumes, and what a clean-up would free now, the image among it or not.
+const spaceDiskSchema = z.object({
+  imageBytes: z.number().min(0).nullable(),
+  toolsBytes: z.number().min(0),
+  spacesBytes: z.number().min(0),
+  freeBytes: z.number().min(0),
+  freesImage: z.boolean(),
+});
+
+export type SpaceDisk = z.infer<typeof spaceDiskSchema>;
+
+// What a clean-up freed, and what Docker kept because something uses it or the removal failed.
+const spaceCleanUpSchema = z.object({
+  freedBytes: z.number().min(0),
+  kept: z.array(z.object({ kind: z.string(), reason: z.enum(['in_use', 'failed']) })),
+  disk: spaceDiskSchema,
+});
+
+export type SpaceCleanUp = z.infer<typeof spaceCleanUpSchema>;
+
+export const readSpaceDisk = (placeId: string, signal?: AbortSignal): Promise<SpaceDisk> =>
+  request(`${SPACES_ROUTE}/places/${encodeURIComponent(placeId)}/disk`, spaceDiskSchema, { signal });
+
+/** Removes what OpenChamber can make again on the place; Docker keeps whatever is in use. */
+export const cleanUpSpaceDisk = (placeId: string): Promise<SpaceCleanUp> =>
+  request(`${SPACES_ROUTE}/places/${encodeURIComponent(placeId)}/clean-up`, spaceCleanUpSchema, { method: 'POST' });
 
 export const listSpaces = async (signal?: AbortSignal): Promise<SpaceEntry[]> =>
   (await request(SPACES_ROUTE, z.object({ spaces: z.array(spaceEntrySchema) }), { signal })).spaces;

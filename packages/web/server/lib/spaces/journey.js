@@ -32,6 +32,7 @@
 // all be saved, unless the user said to delete anyway. See `space-archive.js`.
 
 import crypto from 'node:crypto';
+import fsPromises from 'node:fs/promises';
 
 import { z } from 'zod';
 
@@ -117,6 +118,8 @@ const failureOf = (error) => ({
  * `serverInside.writeIdleStop(spaceId, setting)` tells it to the server inside.
  * `archiveChats({ spaceId, name, projectDirectory, running, allowUnsaved })` saves a space's chats
  * to the host's archive before it goes, see `space-archive.js`; without it the chats go with it.
+ * `folderExists(directory)` says whether the project folder a space was made for is still a
+ * folder on the host, for the list.
  */
 export function createSpaceJourney({
   manager,
@@ -133,6 +136,7 @@ export function createSpaceJourney({
   readHostSecret = () => undefined,
   readIdleStop = async () => ({ ...DEFAULT_IDLE_STOP }),
   saveIdleStop = async () => {},
+  folderExists = async (directory) => (await fsPromises.stat(directory).catch(() => null))?.isDirectory() === true,
   announce = () => {},
   onSpacesChanged = () => {},
   logger = console,
@@ -214,7 +218,13 @@ export function createSpaceJourney({
         outcome.refsRemoved = true;
       } catch (error) {
         outcome.refsRemoved = false;
-        outcome.failures.push(failureOf(error));
+        // A project folder that is gone, moved or deleted, took its refs with it: they cannot be
+        // found from here, and nothing of the space is left to remove, so the delete went through.
+        if (error instanceof SpaceError && error.code === 'project_folder_missing') {
+          logger.warn?.(`[spaces] the service refs of space ${spaceId} stay in its project folder, which is no longer at its path`);
+        } else {
+          outcome.failures.push(failureOf(error));
+        }
       }
     }
     records.remove(spaceId);
@@ -419,6 +429,7 @@ export function createSpaceJourney({
     placeId: entry.placeId,
     projectDirectory: entry.projectDirectory,
     directory: entry.directory,
+    projectFolder: { path: entry.projectDirectory, found: null },
     created: entry.created,
     state: entry.state,
     stoppedIdle: false,
@@ -443,6 +454,10 @@ export function createSpaceJourney({
    * which the UI must show as "unknown" and never as "open". With `access` each running space
    * with grants is asked what its gatekeeper holds, one request per such space, so the list can
    * say "needs access"; without it `access` stays null.
+   *
+   * `projectFolder` names the folder the space was made for, from the record, so a space whose
+   * project is no longer registered can still say where it came from; `found` says whether that
+   * folder is there now, and is null while a creation is under way or when nothing names it.
    */
   const listSpaces = async ({ access = false } = {}) => {
     const [spaces, projects] = await Promise.all([manager.listSpaces({ placeId: place.id }), registeredProjects()]);
@@ -450,12 +465,14 @@ export function createSpaceJourney({
       const projectDirectory = projects.get(space.project) ?? null;
       const { record } = records.read(space.id);
       const grants = record?.grants ?? [];
+      const projectPath = record?.repository ?? projectDirectory;
       return {
         id: space.id,
         name: space.name,
         placeId: space.placeId,
         projectDirectory,
         directory: projectDirectory === null ? null : spaceProjectPath(space.id, projectDirectory),
+        projectFolder: { path: projectPath, found: projectPath === null ? null : await folderExists(projectPath) },
         created: space.created,
         state: space.state,
         stoppedIdle: space.stoppedIdle === true,
@@ -792,6 +809,35 @@ export function createSpaceJourney({
     return change;
   };
 
+  const requirePlace = (placeId) => {
+    if (placeId !== place.id) throw new SpaceError('place_not_found', `There is no place ${placeId}`);
+  };
+
+  /** The disk the spaces take on a place, and what a clean-up would free now (journey step 9). */
+  const readDisk = async (placeId) => {
+    requirePlace(placeId);
+    return place.readDisk();
+  };
+
+  /**
+   * Removes what OpenChamber can make again on a place, see `places/docker-disk.js`; Docker keeps
+   * whatever is in use. Refused while a space is being made, which pulls the image and fills the
+   * tools before any container holds them. Answers what was freed, what Docker kept, and the disk after.
+   */
+  const cleanUpDisk = async (placeId) => {
+    requirePlace(placeId);
+    if (Array.from(pending.values()).some((entry) => entry.state === 'preparing')) {
+      throw new SpaceError('space_preparing', 'A space is being made. Clean up when it is ready.');
+    }
+    const { freedBytes, kept, machine } = await place.cleanUpDisk();
+    for (const item of kept.filter((entry) => entry.reason === 'failed')) {
+      logger.warn?.(`[spaces] clean-up could not remove ${item.kind} ${item.name}: ${item.message}`);
+    }
+    if (machine.state === 'failed') logger.warn?.(`[spaces] the Colima machine did not trim its disk: ${machine.message}`);
+    if (machine.state === 'trimmed') logger.info?.('[spaces] the Colima machine trimmed its disk after a clean-up');
+    return { freedBytes, kept: kept.map(({ kind, reason }) => ({ kind, reason })), disk: await place.readDisk() };
+  };
+
   /** For a turn-off that did not go through after the spaces were stopped: creations are taken again. */
   const reopen = () => { closing = false; };
 
@@ -853,5 +899,5 @@ export function createSpaceJourney({
     return { brought, applied, removal, kept };
   });
 
-  return { createSpace, listSpaces, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, grantAccess, openDomain, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, runSetup, readSetup };
+  return { createSpace, listSpaces, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, grantAccess, openDomain, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, runSetup, readSetup, readDisk, cleanUpDisk };
 }

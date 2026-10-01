@@ -54,10 +54,15 @@ the global cache or persisted history. A failed global or directory fetch keeps
 existing data; it is never treated as an authoritative empty list.
 
 Activity indicators use `SessionActivityIndicator` in project and timeline rows,
-header tabs, switchers and collapsed aggregates. Running uses the info color;
-unread uses success. The local Appearance preference `animatedActivityIndicators`
-is off by default. Enabling it swaps running dots for a stepped spinner, even
-when the OS requests reduced motion. Permission/question badges and per-session
+header tabs, switchers and collapsed aggregates. Each state is a static icon:
+the session's own run is `circle`, a pause held open by a background subagent
+is `robot`, one held open by a background command is `terminal` (all info
+color; `useSessionTurnActivity` in `sync/global-session-status.ts` decides, the
+session's own run first, then the subagent), and a finished unseen turn is
+`checkbox-circle` (success color). Collapsed aggregates show only running or
+unread. The local Appearance preference `animatedActivityIndicators`
+is off by default. Enabling it swaps every running kind for a stepped spinner,
+even when the OS requests reduced motion; the unread icon stays. Permission/question badges and per-session
 elapsed counters retain their existing precedence and behavior. The display
 store is at version 9: missing preferences inherit the default during hydration,
 while an explicitly saved choice survives reload.
@@ -222,7 +227,7 @@ renders `projects`.
   the usual Chats limit. Pinned chats are always shown and never spend that
   limit, so Show more/Show fewer count only unpinned rows. Chats rows render
   with `renderContext: 'timeline-chat'`: one line, no left gutter, pin marker
-  and status dot on the right beside the time; the goal glyph and badges ride
+  and status icon on the right beside the time; the goal glyph and badges ride
   in the same cluster. Collapsing a zone header resets its
   Show more state.
 - Zone headers are sticky in the projects view and never in the timeline; there
@@ -313,6 +318,9 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   recursively mount descendants in the shared scroller. One preorder ID pool
   plus index ranges supplies hidden descendants to subtree selection without
   copying a descendant array for every ancestor.
+- A row's `depth` is its visual indent, not its tree depth: a folder's sessions
+  and run rows start at 1 so they sit under the folder header, and children add
+  one level from there. Do not read `depth > 0` as "this is a subagent".
 - The existing `ScrollableOverlay` is the sole scroll owner. The shared row
   renderer measures variable-height rows, uses stable occurrence keys, keeps a
   bounded pre-initialization window, and pins editing, focused, and open-menu
