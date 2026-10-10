@@ -180,16 +180,18 @@ to existing message/part identities invalidate the current result.
 
 ### Context usage has its own computation, on purpose
 
-`useSessionUIStore.getContextUsage` cannot serve this panel for two reasons:
+The header's readout cannot serve this panel, and the panel once failed in two
+ways by sharing the header's old `useSessionUIStore.getContextUsage` getter:
 
-1. It reads `getSyncMessages(sessionId)` with **no directory**, resolving to the
-   *current* directory's child store, and keys off the store's own
-   `currentSessionId`. A session held by another directory — a worktree, or the
-   moment after a directory switch — reads as "no messages", and the readout
-   vanished while the header still showed a value.
-2. It is an **imperative getter**, as is `useConfigStore.getCurrentModel`.
+1. The header reads the current session's messages with **no directory**,
+   resolving to the *current* directory's child store. A session held by
+   another directory — a worktree, or the moment after a directory switch —
+   reads as "no messages", and the readout vanished while the header still
+   showed a value.
+2. The getter was **imperative**, as is `useConfigStore.getCurrentModel`.
    Selecting one yields a reference that never changes, so calling it during
    render subscribes to nothing; the readout went stale across session switches.
+   The header now reads through `useSessionMessagesSelector`, which subscribes.
 
 `contextUsage.ts` therefore computes the same quantity from messages the panel
 has already subscribed to for a known session and directory, and the panel
