@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import type { Message, Part, Session } from '@/lib/opencode/model';
 import { getLastConversationRecord, isIncompleteAssistantTurn } from '@/lib/opencode/model';
 import { keepCommandSubagentReports } from '@/lib/opencode/subagent-run';
@@ -98,6 +99,8 @@ import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts
 import { ChatSearchBar } from './search/ChatSearchBar';
 import { WorkStatusPanel } from './work-status/WorkStatusPanel';
 import { useWorkStatusVisibility } from './work-status/useWorkStatusVisibility';
+import { useShownSessionSelection } from './useShownSessionSelection';
+import { useRightSlotStore } from '@/components/layout/rightSlot';
 import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
 import { resolveChatPromptReadOnly } from './chatPromptReadOnly';
 import { PermissionDock } from './PermissionDock';
@@ -646,7 +649,7 @@ const ReadOnlyPromptBanner: React.FC<{ text: string; onStop?: () => void; stopLa
                     <Button
                         variant="ghost"
                         size="icon"
-                        className="-my-1.5 -mr-2 shrink-0 text-[var(--status-error)] hover:text-[var(--status-error)]"
+                        className="-my-1.5 -me-2 shrink-0 text-[var(--status-error)] hover:text-[var(--status-error)]"
                         onClick={onStop}
                         aria-label={stopLabel}
                         title={stopLabel}
@@ -790,7 +793,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         waitedSessionIdRef.current = liveSessionId && !liveSessionRenderable ? liveSessionId : null;
     }
     const targetSelection = holdPreviousTimeline ? shownSelectionRef.current : liveSelection;
-    const { sessionId: currentSessionId, directory: currentSessionDirectory } = React.useDeferredValue(targetSelection);
+    const { sessionId: currentSessionId, directory: currentSessionDirectory } = useShownSessionSelection(targetSelection);
     shownSelectionRef.current = { sessionId: currentSessionId, directory: currentSessionDirectory };
     const revealWaited = Boolean(currentSessionId) && currentSessionId === waitedSessionIdRef.current;
 
@@ -1036,7 +1039,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // It yields to the context panel and to a narrow chat; `rowRef` goes on the
     // row that holds both columns, so its width never depends on the panel's
     // own visibility.
-    const { rowRef: workStatusRowRef, visible: workStatusVisible, fits: workStatusFits } = useWorkStatusVisibility({
+    const { rowRef: workStatusRowRef, visible: workStatusVisible, fits: workStatusFits, roomy: workStatusRoomy } = useWorkStatusVisibility({
         isMobile,
         isVSCode,
     });
@@ -1053,6 +1056,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         && !pinned
         && chatSurfaceMode !== 'mini-chat';
     const showWorkStatusPanel = workStatusPanelMountable && workStatusVisible;
+    // The inline card renders in the right slot beside the chat, which owns
+    // the one width animation for the card and the context panel together
+    // (components/layout/rightSlot.ts).
+    const workStatusHost = useRightSlotStore((state) => state.workStatusHost);
 
     // Offered over the chat when there is no room beside it. The panel is still
     // switched on; only the layout refuses it.
@@ -1064,6 +1071,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     const workStatusOverlayMountable = workStatusPanelMountable
         && workStatusPanelEnabled
         && !workStatusFits;
+    // The slot keeps the card's column while the context panel covers it.
+    const workStatusReserved = workStatusPanelMountable && workStatusPanelEnabled && workStatusRoomy;
     const showWorkStatusOverlay = workStatusOverlayMountable && workStatusOverlayOpen;
 
     React.useEffect(() => {
@@ -1104,7 +1113,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             variant="outline"
             size="xs"
             onClick={handleReturnToParentSession}
-            className="absolute left-3 top-3 z-20 !font-normal bg-[var(--surface-background)]/95"
+            className="absolute inset-s-3 top-3 z-20 !font-normal bg-[var(--surface-background)]/95"
             aria-label={t('chat.container.returnToParent.aria')}
             title={parentSession.title?.trim()
                 ? t('chat.container.returnToParent.titleNamed', { title: parentSession.title })
@@ -1116,11 +1125,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     ) : null;
     // A chat of a deleted isolated space is on the Archive page and read-only; the server refuses
     // to run it whatever the screen shows. Its directory is the archive's own, and the list of
-    // archives is read once per runtime.
+    // archives is read once per runtime. A draft opened after such a chat still sits in the
+    // archive's directory until it is sent, and is not read-only: it is a new chat.
     React.useEffect(() => {
         ensureSpaceArchives();
     }, []);
-    const spaceArchive = useSpaceArchiveOf(effectiveSessionDirectory);
+    const spaceArchive = useSpaceArchiveOf(currentSessionId ? effectiveSessionDirectory : null);
     const promptReadOnly = spaceArchive !== null || resolveChatPromptReadOnly(
         currentSession,
         allowPromptingSubagentSessions,
@@ -1423,8 +1433,14 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         const container = scrollRef.current;
         if (!container) return;
 
+        // Read by the transcript's sticky user messages, which inherit it from
+        // here: a new value restyles the transcript, so it is written only when
+        // the height changed.
         const updateChatScrollHeight = () => {
-            container.style.setProperty('--chat-scroll-height', `${container.clientHeight}px`);
+            const value = `${container.clientHeight}px`;
+            if (container.style.getPropertyValue('--chat-scroll-height') !== value) {
+                container.style.setProperty('--chat-scroll-height', value);
+            }
         };
 
         updateChatScrollHeight();
@@ -1446,7 +1462,16 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             };
         }
 
-        const resizeObserver = new ResizeObserver(scheduleUpdate);
+        // A width change (the sidebar or the context panel animating) leaves
+        // the height alone; it is skipped before anything reads layout. Inside
+        // the callback layout is current, so the read forces none.
+        let observedHeight: number | null = null;
+        const resizeObserver = new ResizeObserver((entries) => {
+            const height = entries[entries.length - 1]?.contentRect.height;
+            if (height === undefined || height === observedHeight) return;
+            observedHeight = height;
+            updateChatScrollHeight();
+        });
         resizeObserver.observe(container);
 
         return () => {
@@ -1802,7 +1827,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 			{returnToParentButton}
 			{sessionSurface}
 			{chatSearch.open && currentSessionId && messageSearchEnabled ? (
-				<div className="pointer-events-none absolute right-3 top-2 z-20">
+				<div className="pointer-events-none absolute inset-e-3 top-2 z-20">
 					<ChatSearchBar
 						sessionId={currentSessionId}
 						scrollNode={scrollNode}
@@ -1960,16 +1985,18 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         </ChatColumnExpandedInputContext.Provider>
         </ChatColumnActionsContext.Provider>
         </ChatColumnSessionContext.Provider>
-        {/* Kept mounted while it could ever show, so it can animate its own
-            collapse; `visible` drives that. Unmounting on the spot is what made
-            the chat jump wide before easing narrow again. */}
-        {workStatusPanelMountable ? (
+        {/* Kept mounted while it could ever show, so it can fade out and back
+            in; `visible` drives that, and `reserved` keeps its column in the
+            right slot while the context panel covers it. */}
+        {workStatusPanelMountable && workStatusHost ? createPortal(
             <WorkStatusPanel
                 visible={showWorkStatusPanel}
+                reserved={workStatusReserved}
                 sessionId={currentSessionId ?? null}
                 directory={workStatusDirectory ?? null}
                 repositoryEnabled={!isManagedChatContext}
-            />
+            />,
+            workStatusHost,
         ) : null}
         </div>
     );

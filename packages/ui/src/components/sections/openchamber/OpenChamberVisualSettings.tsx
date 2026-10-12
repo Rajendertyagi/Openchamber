@@ -57,7 +57,6 @@ import {
     SettingsRadioOption,
     SettingsChipGroup,
     SETTINGS_SELECT_TRIGGER_CLASS,
-    SETTINGS_SELECT_SIZE,
     SETTINGS_ICON_BUTTON_CLASS,
     SETTINGS_CONTROL_CLUSTER_CLASS,
     SETTINGS_CLUSTER_CONTROL_CLASS,
@@ -316,7 +315,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'scrollbars' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'tableCellWrap' | 'copyMessagesAsPlainText' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'inputHistoryScope' | 'inputHistoryLimit' | 'messageSearch' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'largeTextPaste' | 'enterToSend' | 'reportUsage' | 'autoSaveEnabled' | 'sessionTabs' | 'animatedActivityIndicators';
+type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'scrollbars' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'tableCellWrap' | 'copyMessagesAsPlainText' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'followUpBehavior' | 'inputHistoryScope' | 'inputHistoryLimit' | 'messageSearch' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'largeTextPaste' | 'enterToSend' | 'reportUsage' | 'autoSaveEnabled' | 'confirmFileTreeMove' | 'sessionTabs' | 'animatedActivityIndicators' | 'layoutAnimations' | 'fileTreeSide';
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
     { id: 'left', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft' },
@@ -376,6 +375,12 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setPromptNavigatorEnabled = useUIStore(state => state.setPromptNavigatorEnabled);
     const autoSaveEnabled = useUIStore(state => state.autoSaveEnabled);
     const setAutoSaveEnabled = useUIStore(state => state.setAutoSaveEnabled);
+    const confirmFileTreeMove = useUIStore(state => state.confirmFileTreeMove);
+    const setConfirmFileTreeMove = useUIStore(state => state.setConfirmFileTreeMove);
+    const layoutAnimations = useUIStore(state => state.layoutAnimations);
+    const fileTreeSide = useUIStore(state => state.fileTreeSide);
+    const setFileTreeSide = useUIStore(state => state.setFileTreeSide);
+    const setLayoutAnimations = useUIStore(state => state.setLayoutAnimations);
     const wideChatLayoutEnabled = useUIStore(state => state.wideChatLayoutEnabled);
     const setWideChatLayoutEnabled = useUIStore(state => state.setWideChatLayoutEnabled);
     const codeBlockLineWrap = useUIStore(state => state.codeBlockLineWrap);
@@ -449,10 +454,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setShowToolFileIcons = useUIStore(state => state.setShowToolFileIcons);
     const showTurnChangedFiles = useUIStore(state => state.showTurnChangedFiles);
     const setShowTurnChangedFiles = useUIStore(state => state.setShowTurnChangedFiles);
-    const showExpandedBashTools = useUIStore(state => state.showExpandedBashTools);
-    const setShowExpandedBashTools = useUIStore(state => state.setShowExpandedBashTools);
-    const showExpandedEditTools = useUIStore(state => state.showExpandedEditTools);
-    const setShowExpandedEditTools = useUIStore(state => state.setShowExpandedEditTools);
     const timeFormatPreference = useUIStore(state => state.timeFormatPreference);
     const setTimeFormatPreference = useUIStore(state => state.setTimeFormatPreference);
     const weekStartPreference = useUIStore(state => state.weekStartPreference);
@@ -671,16 +672,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         window.dispatchEvent(new CustomEvent('openchamber:file-viewer-preview-mode-changed', { detail: { enabled } }));
     }, [setSettingsDefaultFileViewerPreview]);
 
-    const handleShowExpandedBashToolsChange = React.useCallback((enabled: boolean) => {
-        setShowExpandedBashTools(enabled);
-        void updateDesktopSettings({ showExpandedBashTools: enabled });
-    }, [setShowExpandedBashTools]);
-
-    const handleShowExpandedEditToolsChange = React.useCallback((enabled: boolean) => {
-        setShowExpandedEditTools(enabled);
-        void updateDesktopSettings({ showExpandedEditTools: enabled });
-    }, [setShowExpandedEditTools]);
-
     const handleTimeFormatPreferenceChange = React.useCallback((value: 'auto' | '12h' | '24h') => {
         setTimeFormatPreference(value);
         void updateDesktopSettings({ timeFormatPreference: value });
@@ -744,7 +735,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         ? hasLocalizationSettings
         : (shouldShow('theme') || showWindowControlsPositionSetting || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || (shouldShow('scrollbars') && !hasThemeSettings) || (shouldShow('inputBarOffset') && isMobile);
-    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || ((shouldShow('terminalShell') || shouldShow('terminalLoginShell')) && !isVSCode) || shouldShow('fileEditorKeymap') || shouldShow('autoSaveEnabled') || (shouldShow('sessionTabs') && !isVSCode && !isMobile);
+    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || ((shouldShow('terminalShell') || shouldShow('terminalLoginShell')) && !isVSCode) || shouldShow('fileEditorKeymap') || shouldShow('autoSaveEnabled') || (shouldShow('confirmFileTreeMove') && !isVSCode && !isMobile) || (shouldShow('layoutAnimations') && !isVSCode && !isMobile) || (shouldShow('fileTreeSide') && !isVSCode && !isMobile) || (shouldShow('sessionTabs') && !isVSCode && !isMobile);
     const hasBehaviorSettings = shouldShow('mermaidRendering')
         || (shouldShow('sessionGoal') && !isVSCode)
         || shouldShow('userMessageRendering')
@@ -770,7 +761,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('persistDraft')
         || shouldShow('largeTextPaste')
         || shouldShow('showToolFileIcons')
-        || shouldShow('expandedTools')
         || (!isMobile && shouldShow('inputSpellcheck'))
         || shouldShow('enterToSend');
     const showBehaviorDisplaySettings = shouldShow('chatRenderMode')
@@ -801,8 +791,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('showTurnChangedFiles')
         || (!isMobile && shouldShow('inputSpellcheck'))
         || shouldShow('enterToSend')
-        || shouldShow('reasoning')
-        || shouldShow('expandedTools');
+        || shouldShow('reasoning');
     // First behavior section under the page header should not draw a top border on Chat-only;
     // when Appearance (or earlier sections) already rendered, keep the default divider.
     const behaviorSectionDivider = hasAppearanceSettings || hasLayoutSettings || hasNavigationSettings;
@@ -1115,7 +1104,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         settingsItem="appearance.language"
                                     >
                                         <Select value={locale} onValueChange={handleLocaleChange}>
-                                            <SelectTrigger aria-label={t('settings.appearance.language.select')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                            <SelectTrigger aria-label={t('settings.appearance.language.select')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                 <SelectValue>{label(locale)}</SelectValue>
                                             </SelectTrigger>
                                             <SelectContent>
@@ -1136,7 +1125,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                     settingsItem="appearance.time-format"
                                                 >
                                                     <Select value={timeFormatPreference} onValueChange={(value: 'auto' | '12h' | '24h') => handleTimeFormatPreferenceChange(value)}>
-                                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectTimeFormatAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectTimeFormatAria')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                             <SelectValue>{selectedTimeFormatLabel}</SelectValue>
                                                         </SelectTrigger>
                                                         <SelectContent>
@@ -1154,7 +1143,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                     settingsItem="appearance.week-start"
                                                 >
                                                     <Select value={weekStartPreference} onValueChange={(value: 'auto' | 'monday' | 'sunday') => handleWeekStartPreferenceChange(value)}>
-                                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectWeekStartAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectWeekStartAria')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                             <SelectValue>{selectedWeekStartLabel}</SelectValue>
                                                         </SelectTrigger>
                                                         <SelectContent>
@@ -1232,7 +1221,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             void applyPwaOrientation(orientation);
                                         }}
                                     >
-                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.pwaInstallOrientationAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_CLUSTER_CONTROL_CLASS}>
+                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.pwaInstallOrientationAria')} className={SETTINGS_CLUSTER_CONTROL_CLASS}>
                                             <SelectValue placeholder={t('settings.openchamber.visual.field.selectOrientationPlaceholder')}>
                                                 {selectedPwaOrientationLabel}
                                             </SelectValue>
@@ -1278,7 +1267,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             void updateDesktopSettings({ mobileKeyboardMode: mode });
                                         }}
                                     >
-                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.mobileKeyboardModeAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_CLUSTER_CONTROL_CLASS}>
+                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.mobileKeyboardModeAria')} className={SETTINGS_CLUSTER_CONTROL_CLASS}>
                                             <SelectValue placeholder={t('settings.openchamber.visual.field.selectMobileKeyboardModePlaceholder')}>
                                                 {selectedMobileKeyboardModeLabel}
                                             </SelectValue>
@@ -1324,7 +1313,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         controlClassName="w-full flex-wrap"
                                     >
                                         <Select value={uiFont} onValueChange={(value) => setUiFont(value as UiFontOption)}>
-                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectInterfaceFontAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectInterfaceFontAria')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                 <SelectValue>{uiFont === CUSTOM_FONT_ID ? t('settings.openchamber.visual.field.customFont') : UI_FONT_OPTIONS.find((option) => option.id === uiFont)?.label}</SelectValue>
                                             </SelectTrigger>
                                             <SelectContent>
@@ -1366,7 +1355,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         controlClassName="w-full flex-wrap"
                                     >
                                         <Select value={monoFont} onValueChange={(value) => setMonoFont(value as MonoFontOption)}>
-                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectCodeFontAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectCodeFontAria')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                 <SelectValue>{monoFont === CUSTOM_FONT_ID ? t('settings.openchamber.visual.field.customFont') : CODE_FONT_OPTIONS.find((option) => option.id === monoFont)?.label}</SelectValue>
                                             </SelectTrigger>
                                             <SelectContent>
@@ -1610,6 +1599,24 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 </SettingsRadioGroup>
                             </SettingsControlGroup>
                         )}
+                        {shouldShow('fileTreeSide') && !isVSCode && !isMobile && (
+                            <SettingsControlGroup
+                                title={t('settings.openchamber.visual.field.fileTreeSide')}
+                                settingsItem="appearance.file-tree-side"
+                            >
+                                <SettingsRadioGroup aria-label={t('settings.openchamber.visual.field.fileTreeSide')}>
+                                    {(['left', 'right'] as const).map((side) => (
+                                        <SettingsRadioOption
+                                            key={side}
+                                            selected={fileTreeSide === side}
+                                            onSelect={() => setFileTreeSide(side)}
+                                            label={t(`settings.openchamber.visual.option.fileTreeSide.${side}`)}
+                                            ariaLabel={t(`settings.openchamber.visual.option.fileTreeSide.${side}`)}
+                                        />
+                                    ))}
+                                </SettingsRadioGroup>
+                            </SettingsControlGroup>
+                        )}
                         {shouldShow('fileEditorKeymap') && fileEditorKeymap === 'vim' && (
                             <SettingsStackedField
                                 label={t('settings.openchamber.visual.field.fileEditorVimMappings')}
@@ -1642,6 +1649,25 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     settingsItem="appearance.auto-save-enabled"
                                 />
                             )}
+                            {shouldShow('confirmFileTreeMove') && !isVSCode && !isMobile && (
+                                <SettingsCheckboxRow
+                                    checked={confirmFileTreeMove}
+                                    onChange={setConfirmFileTreeMove}
+                                    label={t('settings.openchamber.visual.field.confirmFileTreeMove')}
+                                    ariaLabel={t('settings.openchamber.visual.field.confirmFileTreeMove')}
+                                    settingsItem="appearance.confirm-file-tree-move"
+                                />
+                            )}
+                            {shouldShow('layoutAnimations') && !isVSCode && !isMobile && (
+                                <SettingsCheckboxRow
+                                    checked={layoutAnimations}
+                                    onChange={setLayoutAnimations}
+                                    label={t('settings.openchamber.visual.field.layoutAnimations')}
+                                    ariaLabel={t('settings.openchamber.visual.field.layoutAnimationsAria')}
+                                    info={t('settings.openchamber.visual.field.layoutAnimationsInfo')}
+                                    settingsItem="appearance.layout-animations"
+                                />
+                            )}
                             {showTerminalShellSetting && (
                                 <SettingsStackedField
                                     label={t('settings.openchamber.visual.field.terminalShell')}
@@ -1650,7 +1676,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     className="pt-2"
                                 >
                                     <Select value={terminalShell} onValueChange={(value) => { if (isTerminalShell(value)) setTerminalShell(value); }}>
-                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.terminalShellAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.terminalShellAria')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -1726,7 +1752,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                         onClick={() => handleChatRenderModeChange(option.id)}
                                                         aria-pressed={selected}
                                                         className={cn(
-                                                            'flex flex-col items-start gap-1 rounded-lg border p-3 text-left transition-colors',
+                                                            'flex flex-col items-start gap-1 rounded-lg border p-3 text-start transition-colors',
                                                             selected
                                                                 ? 'border-border bg-interactive-selection text-interactive-selection-foreground'
                                                                 : 'border-border hover:border-border/80 hover:bg-interactive-hover'
@@ -1967,29 +1993,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                         {showBehaviorFeatureCheckboxes && (
                             <>
-                                {shouldShow('expandedTools') && (
-                                    <SettingsSection
-                                        title={t('settings.openchamber.visual.section.showToolsOpenedByDefault')}
-                                        divider={showBehaviorDisplaySettings || showTransportSection || showBehaviorMessageOptions || behaviorSectionDivider}
-                                        contentClassName={SETTINGS_OPTION_STACK_CLASS}
-                                    >
-                                        <SettingsCheckboxRow
-                                            checked={showExpandedBashTools}
-                                            onChange={handleShowExpandedBashToolsChange}
-                                            label={t('settings.openchamber.visual.field.bash')}
-                                            ariaLabel={t('settings.openchamber.visual.field.showExpandedBashToolsAria')}
-                                        />
-                                        <SettingsCheckboxRow
-                                            checked={showExpandedEditTools}
-                                            onChange={handleShowExpandedEditToolsChange}
-                                            label={t('settings.openchamber.visual.field.editTools')}
-                                            ariaLabel={t('settings.openchamber.visual.field.showExpandedEditToolsAria')}
-                                        />
-                                    </SettingsSection>
-                                )}
                                 <SettingsSection
                                     title={t('settings.openchamber.visual.section.sessionAssistance')}
                                     settingsItem="chat.session-assistance"
+                                    divider={showBehaviorDisplaySettings || showTransportSection || showBehaviorMessageOptions || behaviorSectionDivider}
                                     contentClassName={SETTINGS_OPTION_STACK_CLASS}
                                 >
                                     <SettingsCheckboxRow

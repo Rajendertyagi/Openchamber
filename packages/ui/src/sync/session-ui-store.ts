@@ -33,8 +33,10 @@ import { selectCommandsForDirectory, useCommandsStore } from "@/stores/useComman
 import { selectSkillsForDirectory, useSkillsStore } from "@/stores/useSkillsStore"
 import { getDeferredSafeStorage } from "@/stores/utils/safeStorage"
 import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
+import { prepareUserMessageResume } from "./user-message-resume"
 import { normalizePath } from "@/lib/pathNormalization"
 import { CHAT_DRAFT_PROJECT_ID, createChatDirectory, deleteChatDirectory, getChatsRootFromDirectory, isChatDirectoryPath, warmChatsRootDirectory } from "@/lib/chatDirectories"
+import { isSpaceArchiveDirectory } from "@/lib/spaces/space-archives"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { composeForkSessionMessage } from "@/lib/messages/executionMeta"
 import { findLatestUserModelChoice } from "@/lib/messages/userModelChoice"
@@ -340,6 +342,8 @@ type CapturedSendTarget = {
 }
 
 type SendMessageOptions = {
+  /** Explicit composer intent; automated continuations must not restore archives. */
+  userInitiated?: boolean
   target?: CapturedSendTarget
   sessionId?: string
   directory?: string
@@ -1067,6 +1071,17 @@ export async function materializeOpenDraftSession(selection: {
   // directory scope than the session that was just created.
   const createdDirectory = normalizePath(created.directory ?? draftDirectoryOverride ?? null)
 
+  // A chat started while the Chats section is hidden would be listed nowhere
+  // in the sidebar, so starting one brings the section back.
+  if (isChatDraft && !useSessionDisplayStore.getState().showChatsSection) {
+    useSessionDisplayStore.getState().setShowChatsSection(true)
+    void import("@/lib/persistence")
+      .then(({ updateDesktopSettings }) => updateDesktopSettings({ sidebarShowChatsSection: true }))
+      .catch((error) => {
+        console.warn("Failed to save the shown Chats section:", error)
+      })
+  }
+
   persistDraftTarget({
     projectId: draftProjectId,
     directory: createdDirectory,
@@ -1364,11 +1379,15 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // Callers that forward "the current session's directory" forward it for
     // chat sessions too, and a chat session's scratch directory names no
     // project. Treating it as an explicit project target would force a project
-    // draft rooted in scratch; it is a request for another chat.
+    // draft rooted in scratch; it is a request for another chat. The archive
+    // directory of a deleted isolated space is the same: a chat opened from
+    // the Archive page leaves it behind as the current one, and a draft rooted
+    // there would make a live session inside the archive.
+    const isScratchDirectory = (directory: string): boolean => isChatDirectoryPath(directory) || isSpaceArchiveDirectory(directory)
     const rawExplicitDirectory = options?.directoryOverride !== undefined
       ? normalizePath(options.directoryOverride)
       : null
-    const explicitDirectoryIsChat = rawExplicitDirectory !== null && isChatDirectoryPath(rawExplicitDirectory)
+    const explicitDirectoryIsChat = rawExplicitDirectory !== null && isScratchDirectory(rawExplicitDirectory)
     const explicitDirectory = explicitDirectoryIsChat ? null : rawExplicitDirectory
     const persistedProjectById = persistedTarget?.projectId
       ? projects.find((p) => p.id === persistedTarget.projectId) ?? null
@@ -1381,7 +1400,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // erase the project the user last picked. A managed chat scratch directory
     // is not external; the recorded project still reopens from it.
     const isImplicitExternalChatFallback = currentDirectory !== null
-      && !isChatDirectoryPath(currentDirectory)
+      && !isScratchDirectory(currentDirectory)
       && currentDirProject === null
       && options?.automatic !== true
       && options?.target === undefined
@@ -1430,7 +1449,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       // A chat session leaves a managed scratch directory behind as the current
       // one; it owns no project, so it must not decide this draft's project —
       // the recorded target below knows which project the user last chose.
-      if (currentDirectory && !isChatDirectoryPath(currentDirectory)) return currentDirProject
+      if (currentDirectory && !isScratchDirectory(currentDirectory)) return currentDirProject
       return persistedProject ?? fallbackProject
     })()
 
@@ -1439,8 +1458,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       if (explicitProject) return normalizePath(explicitProject.path ?? null)
       // A chat session's directory is a managed scratch folder, never a
       // project: letting it through would open a project draft rooted in it.
-      if (currentDirectory && !isChatDirectoryPath(currentDirectory)) return currentDirectory
-      if (persistedTarget?.directory && !isChatDirectoryPath(persistedTarget.directory)) return persistedTarget.directory
+      if (currentDirectory && !isScratchDirectory(currentDirectory)) return currentDirectory
+      if (persistedTarget?.directory && !isScratchDirectory(persistedTarget.directory)) return persistedTarget.directory
       return normalizePath(selectedProject?.path ?? null)
     })()
 
@@ -1897,6 +1916,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
       // ---- Existing session ----
       const targetSessionId = capturedTarget?.sessionId ?? options?.sessionId ?? get().currentSessionId
+      const resumeAfterSend = options?.userInitiated && inputMode !== 'shell' && targetSessionId
+        ? prepareUserMessageResume(targetSessionId, capturedRuntimeKey)
+        : undefined
       const sessionAgentSelection = targetSessionId
         ? useSelectionStore.getState().getSessionAgentSelection(targetSessionId)
         : null
@@ -2008,6 +2030,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       if (knowledge?.text) {
         void reportSessionKnowledgeDelivered(currentSessionDirectory, targetSessionId || "", knowledge.signature)
       }
+      // Keep restore failures outside the send promise and its retry path.
+      void resumeAfterSend?.().catch(console.warn)
     })
   },
 

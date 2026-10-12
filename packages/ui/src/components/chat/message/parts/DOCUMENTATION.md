@@ -89,6 +89,18 @@ its logical gutter, allowing adjacent Arabic and English items. Inline code
 and code widgets have explicit LTR attributes so they do not choose the
 containing item's direction. Direction changes preserve source and copy text.
 
+### Turn footer copy and image
+
+The footer under a turn's last assistant message copies and saves the whole
+reply: the text parts of every assistant message in the turn, in order, with
+tool output and reasoning left out. `MessageList` hands the earlier text to the
+last message as `earlierAssistantText`; per-message and per-justification copy
+buttons keep copying only their own text. Earlier messages may be folded or not
+mounted, and in sorted mode part of the last message sits in Activity, so a
+reply of more than one text part is drawn by `buildTurnImageExportSource` from
+Markdown with the chat's classes and `decorateMarkdown`. A reply of one text
+part keeps the copy of what the chat rendered.
+
 ### Optional live history disclosure
 
 Activity Default is shared by the settings UI in both render modes. In live
@@ -138,16 +150,20 @@ in ESM and CJS. Drop it once upstream ships #536 or an equivalent, and verify
 with `bun packages/ui/tests/chat-history-scroll.browser.mjs`, which runs the
 prepend scenarios over several row-height profiles for this reason.
 
-The same patch makes the list's DOM-order pass (`useDOMOrder`) treat its own
-mount as activity. With `initialScrollAtEnd` the list hands its first
-containers to the last rows, so a freshly opened timeline is always in reverse
-DOM order and the pass moves most rows. Moving a row restyles its whole
-subtree, about 45 ms on an eight-turn session. Unpatched, the first pass ran
-with no delay whenever the first paint already had its final geometry, inside
-the opening reveal, and held the fade-in back by that much. Patched, it waits
-for 500 ms of quiet after mount, after the reveal. Rows keep their visual
-order throughout; only the DOM order (screen readers, tab order) is corrected
-later. `scripts/legend-list-dom-order.test.mjs` checks the installed bundles.
+The same patch hands out containers in item order while the list's initial
+scroll is active, end-aligned included. Upstream reverses them for an
+end-aligned start (`renderPriority` in `findAvailableContainers`), so a
+freshly opened timeline was in reverse DOM order and the DOM-order pass
+(`useDOMOrder`) moved nearly every row about 300 ms after the reveal: each row
+restyled, and with an accessibility client on, the transcript re-serialized
+(about 40 ms on every session open and switch). Containers render in index
+order, so rows are now in DOM order (what screen readers and tab order follow)
+from the first paint, and the pass finds nothing to move. Scrolling up still
+recycles containers out of order; the pass corrects that as before. The patch
+also keeps the pass's own delay: it treats the list's mount as activity, so a
+pass that does have work waits for 500 ms of quiet instead of landing in the
+opening reveal. `scripts/legend-list-dom-order.test.mjs` runs the installed
+bundles' allocation and timer code for both.
 
 The header retains its report when expanded and has no hover background. Its
 left inset matches sorted Activity. Diff deletions use the ASCII hyphen.
@@ -189,6 +205,14 @@ finished with `stop`, so no tool patch is parsed while the turn streams.
   Markdown preview opts into rendering raw HTML (`allowRawHtml`, see
   `components/views/files/DOCUMENTATION.md`). Safe custom application links go through the
   app-link confirmation flow in every supported renderer, including VS Code.
+- File references become links only once the file is confirmed
+  (`MarkdownRendererImpl` `useFileReferenceInteractions`): inline code, links
+  and path-like tokens inside code blocks are probed through the bounded,
+  cached stat queue after the message settles (never while it streams, never
+  on mobile), and each pass writes all its links at once. Inside a code block
+  nothing is written for a token that leads nowhere, so code full of
+  `console.log` and `this.state` stays plain text with no DOM change; a real
+  file's token gets its span and link a moment after the message shows.
 - Final assistant Markdown rendering is independent from image gallery
   extraction: gallery presence never changes the chat body. Assistant image
   syntax consistently renders as a shared image icon followed by its filename,
@@ -238,7 +262,7 @@ finished with `stop`, so no tool patch is parsed while the turn streams.
   The status pill says `running a script`, or `calling <tool>` once
   `metadata.toolCalls` names one (`hooks/useAssistantStatus.ts`).
 - Running `shell` output falls back to `state.metadata.output` until canonical `state.output` arrives. Its output viewport grows with the content up to `46vh`, then scrolls and follows new output until the user scrolls up; following resumes when the user returns to the bottom. Live output appends or replaces rewritten snapshots as plain text without worker highlighting; finalized output normalizes ANSI terminal controls with a bounded synthetic-cell budget, bypasses the throttle, and receives the normal one-time highlighted rendering.
-- A background `shell` call (`background: true`, or moved to the background mid-run) settles at once with `metadata.status: "running"` and a `shellID`; its text is a notice plus an instruction for the model. `ToolPart` renders it through `BackgroundShellToolPartContent`, which rebuilds the part from the command's real state (`backgroundShellPart.ts`) so the row keeps the ordinary shell look collapsed and expanded: while `sync/background-shells.ts` lists the command it is a running shell with a live timer from the call start and an `in background` label, and its expanded output is read from `/api/shell/:id/output` once a second, only while expanded (`useBackgroundShellOutput.ts`, starting from the last 64 KiB). Once OpenCode appends the command's completion (a `synthetic` message with `source: "shell"`, see `@/lib/opencode/background-shell`) the row is a finished or failed shell ending at that message, with its real output; the completion message itself stays hidden from the timeline. While it runs the row has a stop action. OpenCode 2.0.19 has no route that cancels a background job, and `shell.remove` reports the command to the agent as an error (`Shell.NotFoundError`, "nothing ran"), after which agents relaunch it; `opencodeClient.stopBackgroundShell` therefore first admits a non-resuming synthetic note (`shellCancellationNote`) that explains the coming error as the user's stop without forbidding the command, and removes the shell only once the note is in. The note stays out of the timeline (no context metadata); its `openchamberShellCancellation` metadata makes the row read "stopped" instead of failed. Drop the note once OpenCode reports a cancel itself. The composer's `BackgroundShellsStrip` offers the same stop for every running command of the session and its subagents (see `composer/DOCUMENTATION.md`). Between the two, or before the list was read, the row shows the notice without the model instruction and no duration. The user moves a foreground command (or a subagent the turn waits on) there with `session.background`, which backgrounds all of the session's blocking work at once: the action sits in the status chip above the composer and in the scroll-to-bottom pill (`components/BackgroundWorkButton.tsx`, a sibling of the pill's scroll button), shown only while `useAssistantStatus` reports `working.canBackground`, and on the customizable `background_session_work` shortcut (default `mod+shift+b`; not the TUI's `ctrl+b`, which the composer's macOS emacs keymap uses to move the caret and which is `mod+b` elsewhere). The row then turns into the background row above.
+- A background `shell` call (`background: true`, or moved to the background mid-run) settles at once with `metadata.status: "running"` and a `shellID`; its text is a notice plus an instruction for the model. `ToolPart` renders it through `BackgroundShellToolPartContent`, which rebuilds the part from the command's real state (`backgroundShellPart.ts`) so the row keeps the ordinary shell look collapsed and expanded: while `sync/background-shells.ts` lists the command it is a running shell with a live timer from the call start and an `in background` label, and its expanded output is read from `/api/shell/:id/output` once a second, only while expanded (`useBackgroundShellOutput.ts`, starting from the last 64 KiB). Once OpenCode appends the command's completion (a `synthetic` message with `source: "shell"`, see `@/lib/opencode/background-shell`) the row is a finished or failed shell ending at that message, with its real output; the completion message itself stays hidden from the timeline. While it runs the row has a stop action. OpenCode 2.0.19 has no route that cancels a background job, and `shell.remove` reports the command to the agent as an error (`Shell.NotFoundError`, "nothing ran"), after which agents relaunch it; `opencodeClient.stopBackgroundShells` therefore first admits one non-resuming synthetic note (`shellCancellationNote`) for the commands of one session it stops, which explains the coming errors as the user's stop without forbidding the commands, and removes the shells together only once the note is in. The note stays out of the timeline (no context metadata); its `openchamberShellCancellation` metadata (`shellIDs`, or a single `shellID` in notes written before stops were grouped) makes each named row read "stopped" instead of failed. Drop the note once OpenCode reports a cancel itself. The composer's `BackgroundShellsStrip` offers the same stop for every running command of the session and its subagents (see `composer/DOCUMENTATION.md`). Between the two, or before the list was read, the row shows the notice without the model instruction and no duration. The user moves a foreground command (or a subagent the turn waits on) there with `session.background`, which backgrounds all of the session's blocking work at once: the action sits in the status chip above the composer and in the scroll-to-bottom pill (`components/BackgroundWorkButton.tsx`, a sibling of the pill's scroll button), shown only while `useAssistantStatus` reports `working.canBackground`, and on the customizable `background_session_work` shortcut (default `mod+shift+b`; not the TUI's `ctrl+b`, which the composer's macOS emacs keymap uses to move the caret and which is `mod+b` elsewhere). The row then turns into the background row above.
 - A `subagent` call that went to the background (`background: true`, or moved there with `session.background`) settles at once with `metadata.status: "running"` and the child in `metadata.sessionID`. `SubagentToolPartContent` rebuilds it from the child (`backgroundSubagentPart.ts`): running while the child session is active in `global-session-status`, then finished, failed or stopped from the report OpenCode appends (`findSubagentRun`), with the `in background` header label while it runs, `stopped` after a cancel, and the stop action described for subagent rows above. `ChatContainer` drops that report from the timeline (`keepCommandSubagentReports`), so the subagent stays where it was started instead of reappearing as a new turn at the end. Only reports of `subagent: true` commands, which have no call row, still render as their own `TimelineNotice` turn, and only when the child started inside the loaded history; any other report (a call not loaded yet, an unknown child) stays out of the chat and is reachable from the session's subagent list, so loading older history never makes the chat shift.
 - The result of a session the agent dispatched with `returnResult` arrives as a `synthetic` message with `source: "openchamber-session"` (`@/lib/opencode/dispatched-session`, delivered by the server's `lib/dispatch-results`). It is a background report like a subagent run (`isBackgroundReportEntry`): it opens a turn, so the woken agent's reply renders below it, and a fork after an answer cuts before it. `TimelineNotice` renders it as one collapsed row, `Session finished: <title>` (failed / stopped variants carry the status icon), that opens to the answer as Markdown with an `Open session` action going through `openSessionLink`.
 - Thinking/Justification duration is hidden in `sorted` mode (handled in `ReasoningPart.tsx` + `JustificationBlock.tsx`).

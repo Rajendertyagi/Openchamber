@@ -6,7 +6,7 @@ import { BackgroundWorkButton } from "./components/BackgroundWorkButton";
 // The floating assistant-status chip that hovers above the composer while the
 // agent works ("Claude is working…"). ONLY that. The composer's
 // own bar — pending changes, todos dropdown — is ComposerStatusBar: they used
-// to share this component, and every restyle of this chip (glass, placement)
+// to share this component, and every restyle of this chip (surface, placement)
 // silently dragged the composer bar and its dropdown along with it.
 
 const STATUS_ROW_CONTAINER_STYLE = { containerType: "inline-size" as const, containerName: "status-row" };
@@ -53,12 +53,15 @@ export const StatusRow: React.FC<StatusRowProps> = ({
       // scroll-to-bottom pill uses).
       style={STATUS_ROW_CONTAINER_STYLE}
     >
-      {/* h-8 matches the turn footer's real row height: its h-8 action
-          buttons define the footer line, with the meta text centered in it. */}
-      {/* The glass chip lives here, not on the container: the root above is
+      {/* 28px, the toolbar control height, shared with the scroll-to-bottom
+          pill that takes over this label away from the live edge. */}
+      {/* The chip lives here, not on the container: the root above is
           an inline-size query container, whose width ignores its children —
           a shrink-to-fit wrapper around it always collapsed to zero. */}
-      <div className="oc-glass-popover inline-flex w-max max-w-full items-center gap-2 h-8 whitespace-nowrap rounded-full [corner-shape:round] px-3">
+      {/* Same start inset the arrow slot gives the icon: 1px border + 6px.
+          The logo box is 16px like the arrow icon, its mark normalized in
+          WorkingPlaceholder, so the visible marks land on the same line. */}
+      <div className="oc-surface-floating inline-flex w-max max-w-full items-center gap-2 h-7 whitespace-nowrap rounded-full [corner-shape:round] ps-1.5 pe-3">
         <div className="flex items-center min-w-0 gap-2 overflow-x-hidden">
           {shouldRenderPlaceholder ? (
             <WorkingPlaceholder
@@ -74,7 +77,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
             />
           ) : null}
         </div>
-        {onBackground ? <BackgroundWorkButton onClick={onBackground} className="-mr-2 h-6 w-6" /> : null}
+        {onBackground ? <BackgroundWorkButton onClick={onBackground} className="-me-2.5 h-6 w-6" /> : null}
       </div>
     </div>
   );

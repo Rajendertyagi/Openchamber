@@ -101,6 +101,7 @@
     "profile:compare": "node scripts/profile-compare.mjs",
     "profile:heap": "node scripts/profile-heap.mjs",
     "profile:composer": "node scripts/profile-composer.mjs",
+    "profile:toggle": "node scripts/profile-toggle.mjs",
     "profile:serve": "node scripts/perf/isolated-server.mjs",
     "profile:analyze": "node scripts/perf/analyze-run.mjs"
   },
@@ -130,8 +131,8 @@
     "@heroui/theme": "^2.4.23",
     "@lezer/highlight": "^1.2.3",
     "@octokit/rest": "^22.0.1",
-    "@opencode/client": "2.0.25",
-    "@opencode/schema": "2.0.25",
+    "@opencode/client": "2.0.26",
+    "@opencode/schema": "2.0.26",
     "@radix-ui/react-collapsible": "^1.1.12",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",

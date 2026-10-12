@@ -916,7 +916,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         {onClose ? (
           <button
             type="button"
-            className="-ml-1 flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="-ms-1 flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={t('mobile.surface.closeAria')}
             onClick={onClose}
             style={{ touchAction: 'manipulation' }}
@@ -1056,7 +1056,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         {onClose ? (
           <button
             type="button"
-            className="-ml-1 flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="-ms-1 flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={t('mobile.surface.closeAria')}
             onClick={onClose}
             style={{ touchAction: 'manipulation' }}
@@ -1066,7 +1066,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         ) : null}
         <DropdownMenu open={modeMenuOpen} onOpenChange={setModeMenuOpen}>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" className={dropdownTriggerVariants({ size: 'default' })} data-mobile-comparison-trigger aria-label={t('diffView.scope.selectorAria')}>
+            <Button variant="outline" className={dropdownTriggerVariants({ size: 'mobile' })} data-mobile-comparison-trigger aria-label={t('diffView.scope.selectorAria')}>
               <span>{modeLabel}</span>
               <Icon name="arrow-down-s" className="size-4" />
             </Button>
@@ -1403,7 +1403,7 @@ const MobileComparisonFileList: React.FC<{ files: GitComparisonFile[]; onSelect:
           const statusColor = file.status === 'A' ? 'var(--status-success)' : file.status === 'D' ? 'var(--status-error)'
             : file.status === 'R' || file.status === 'C' ? 'var(--status-info)' : 'var(--status-warning)';
           return <li key={file.path}>
-            <Button variant="ghost" size="lg" className="w-full justify-start gap-2.5 text-left normal-case" onClick={() => onSelect(file.path)}>
+            <Button variant="ghost" size="lg" className="w-full justify-start gap-2.5 text-start normal-case" onClick={() => onSelect(file.path)}>
               <span className="w-4 shrink-0 text-center typography-meta font-semibold uppercase" style={{ color: statusColor }} aria-label={statusLabel}>{file.status}</span>
               <FileTypeIcon filePath={file.path} className="size-4 shrink-0" />
               <span className="min-w-0 flex-1 truncate typography-ui-label" title={file.path}>{file.path}</span>

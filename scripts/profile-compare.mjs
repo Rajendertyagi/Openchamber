@@ -39,17 +39,22 @@ Measurement:
   --scenarios <list>       Comma-separated (default: stream,code,agent,switch,idle).
                            Available: ${"<SCENARIOS>"}
   --runs <n>               Runs per scenario and round (default: 5). For switch:
-                           reload cycles; for startup: launches
+                           reload cycles; for startup: launches; for toggle:
+                           measured close/open pairs per phase
   --rounds <n>             Alternate before/after this many times (default: 1).
                            Use 2 or more when the expected change is small:
                            machine drift then lands on both sides
   --build <prod|diag>      Build to serve (default: prod). diag is the
                            unminified build with source maps and store
                            notifications, for attribution only
-  --render-probe           Pass --render-probe to session, switch and idle
+  --render-probe           Pass --render-probe to session, switch, idle and toggle
                            scenarios (use with --build diag for real names)
   --save-trace             Session scenarios keep trace.json; the table then
                            adds frames, restyled elements, layerize and GPU rows
+  --force-accessibility    Session, switch and toggle scenarios launch Chrome
+                           with its accessibility tree on, the way a screen
+                           reader or a macOS app that reads other windows turns
+                           it on, so the result does not depend on the machine
 
 Locations:
   --root <dir>             Worktrees, builds, server state, seed and Chrome
@@ -86,6 +91,12 @@ const SCENARIOS = {
   "startup-warm": { kind: "startup", once: true, args: (_seed, runs) => ["--cache", "warm", "--runs", String(runs), "--warmup", "1"] },
   heap: { kind: "heap", seed: true, once: true, args: () => ["--count", "20"] },
   composer: { kind: "composer", seed: true, args: (seed) => ["--session", seed.long] },
+  // Headed: frame pacing from a software compositor says nothing about a
+  // user's frames. Opens a visible window.
+  toggle: { kind: "toggle", seed: true, once: true, args: (_seed, runs) => ["--title", "perf: long 120", "--count", String(runs)] },
+  "toggle-short": { kind: "toggle", seed: true, once: true, args: (_seed, runs) => ["--title", "perf: short A", "--count", String(runs)] },
+  // The full-width context surface: wide enough to re-wrap the transcript.
+  "toggle-context": { kind: "toggle", seed: true, once: true, args: (_seed, runs) => ["--title", "perf: long 120", "--surface", "context", "--count", String(runs)] },
 }
 
 const SCRIPTS = {
@@ -95,12 +106,13 @@ const SCRIPTS = {
   startup: "scripts/profile-startup.mjs",
   heap: "scripts/profile-heap.mjs",
   composer: "scripts/profile-composer.mjs",
+  toggle: "scripts/profile-toggle.mjs",
 }
 
 const parseArgs = (argv) => {
   const options = {
     before: "HEAD", after: null, scenarios: ["stream", "code", "agent", "switch", "idle"], runs: 5, rounds: 1, build: "prod",
-    renderProbe: false, saveTrace: false, root: join(REPO_ROOT, "tmp/perf-compare"), output: null, port: 4799, fixturePort: 4798,
+    renderProbe: false, saveTrace: false, forceAccessibility: false, root: join(REPO_ROOT, "tmp/perf-compare"), output: null, port: 4799, fixturePort: 4798,
     opencodeBinary: undefined, dryRun: false,
   }
   for (let index = 0; index < argv.length; index += 1) {
@@ -114,6 +126,7 @@ const parseArgs = (argv) => {
     else if (value === "--build") options.build = argv[++index]
     else if (value === "--render-probe") options.renderProbe = true
     else if (value === "--save-trace") options.saveTrace = true
+    else if (value === "--force-accessibility") options.forceAccessibility = true
     else if (value === "--root") options.root = resolve(argv[++index])
     else if (value === "--output") options.output = resolve(argv[++index])
     else if (value === "--port") options.port = Number(argv[++index])
@@ -201,7 +214,7 @@ const runOrThrow = async (description, command, args, options) => {
   if (code !== 0) throw new Error(`${description} failed with exit code ${code}; see ${options.log}`)
 }
 
-const distFor = (worktree, build) => join(worktree, "packages/web", build === "diag" ? "dist-diag" : "dist")
+const distFor = (worktree, build) => (build === "diag" ? join(worktree, "tmp/web-dist-diag") : join(worktree, "packages/web/dist"))
 
 /** Creates or reuses the side's worktree and build; returns the dist to serve. */
 const prepareSide = async (side, source, options) => {
@@ -293,8 +306,9 @@ const scenarioCommand = ({ name, scenario, seed, options, paths, side, url, outp
   const common = scenario.kind === "startup" ? ["--url", `${url}/`, "--home", chrome] : ["--url", url, "--profile-dir", chrome]
   const extra = []
   if (scenario.kind === "session") extra.push("--dir", paths.project)
-  if (options.renderProbe && ["session", "switch", "idle"].includes(scenario.kind) && !scenario.uninstrumented) extra.push("--render-probe")
+  if (options.renderProbe && ["session", "switch", "idle", "toggle"].includes(scenario.kind) && !scenario.uninstrumented) extra.push("--render-probe")
   if (options.saveTrace && scenario.kind === "session" && !scenario.uninstrumented) extra.push("--save-trace")
+  if (options.forceAccessibility && ["session", "switch", "toggle"].includes(scenario.kind)) extra.push("--force-accessibility")
   return [SCRIPTS[scenario.kind], ...common, ...extra, ...scenario.args(seed, options.runs), "--output", output, "--label", `${side} ${name}`]
 }
 
@@ -331,9 +345,11 @@ const main = async () => {
   mkdirSync(options.output, { recursive: true })
   const metaFile = join(options.output, "sources.json")
   const meta = { before: { ref: sources.before.label, commit: sources.before.commit, hash: sources.before.hash }, after: { ref: sources.after.label, commit: sources.after.commit, hash: sources.after.hash }, build: options.build }
+  // Only when on, so result directories from before this option still resume.
+  if (options.forceAccessibility) meta.forceAccessibility = true
   const previous = readJson(metaFile)
   if (previous && JSON.stringify({ ...previous, recordedAt: undefined }) !== JSON.stringify({ ...meta, recordedAt: undefined })) {
-    throw new Error(`${options.output} holds results for other sources or another build (${metaFile}); pass a new --output or delete it.`)
+    throw new Error(`${options.output} holds results for other sources, another build or another accessibility setting (${metaFile}); pass a new --output or delete it.`)
   }
   writeFileSync(metaFile, JSON.stringify({ ...meta, recordedAt: previous?.recordedAt ?? new Date().toISOString() }, null, 2))
 

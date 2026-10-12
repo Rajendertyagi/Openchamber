@@ -19,6 +19,7 @@ import process from "node:process"
 
 import { percentile, round } from "./metrics.mjs"
 import { invalidReasons, modifications, readSummary } from "./run-summary.mjs"
+import { measuredToggles, TOGGLE_METRICS } from "./toggle-analysis.mjs"
 import { cachedPipelineMetrics } from "./trace-analysis.mjs"
 
 const HELP = `Usage: node scripts/perf/compare-runs.mjs <before dir> <after dir> [options]
@@ -61,20 +62,25 @@ const processCpu = (data, label) => {
 }
 
 const metric = (key) => (data) => data.metrics?.[key]
+// Read from the timeline trace, which an uninstrumented run (`--process-cpu-only`)
+// never records: its summary holds placeholder zeros, so they read as missing.
+const traceMetric = (key) => (data) => (data.instrumented === false ? null : data.metrics?.[key])
 
 /** Per-run values: one number per run directory and metric, as [read(summary), label, lowerIsBetter]. */
 const RUN_METRICS = {
   session: [
-    [metric("longestTaskMs"), "longest task ms", LOWER],
-    [metric("longTaskCount"), "tasks >50 ms", LOWER],
-    [metric("tasksOver16msCount"), "main tasks >16.7 ms", LOWER],
-    [metric("tasksOver8msCount"), "main tasks >8.33 ms", LOWER],
-    [metric("finalizeLongestTaskMs"), "longest task ≤1 s after idle ms", LOWER],
-    [metric("taskP99Ms"), "task p99 ms", LOWER],
+    [traceMetric("longestTaskMs"), "longest task ms", LOWER],
+    [traceMetric("longTaskCount"), "tasks >50 ms", LOWER],
+    [traceMetric("tasksOver16msCount"), "main tasks >16.7 ms", LOWER],
+    [traceMetric("tasksOver8msCount"), "main tasks >8.33 ms", LOWER],
+    [traceMetric("finalizeLongestTaskMs"), "longest task ≤1 s after idle ms", LOWER],
+    [traceMetric("accessibilityMs"), "accessibility ms", LOWER],
+    [traceMetric("taskP99Ms"), "task p99 ms", LOWER],
     [metric("mainThreadBusyPercent"), "main-thread busy %", LOWER],
     [metric("busyMsPerKilochar"), "busy ms per 1k chars", LOWER],
     [metric("recalcStylePerSecond"), "style recalcs/s", LOWER],
     [metric("layoutsPerSecond"), "layouts/s", LOWER],
+    [metric("framesPerSecond"), "rAF callbacks/s", LOWER],
     [metric("heapMaxMb"), "heap max MB", LOWER],
     [(data) => processCpu(data, "chrome renderer"), "renderer process CPU %", LOWER],
     [(data) => processCpu(data, "chrome GPU"), "GPU process CPU %", LOWER],
@@ -103,11 +109,15 @@ const RUN_METRICS = {
     [(data) => data.medianPerLine?.elements, "elements restyled per line", LOWER],
     [(data) => data.medianPerLine?.ms, "recalc ms per line", LOWER],
   ],
+  toggle: [
+    [(data) => data.session?.mountedMessages, "mounted messages (workload)", WORKLOAD],
+  ],
 }
 
 const PIPELINE_METRICS = [
   ["framesSubmittedPerSecond", "frames submitted/s", LOWER],
   ["mainCommitsPerSecond", "main-thread frame commits/s", LOWER],
+  ["paintsPerSecond", "paints/s", LOWER],
   ["recalcElementsPerSecond", "elements restyled/s", LOWER],
   ["layerizeMsPerSecond", "layerize ms/s", LOWER],
   ["gpuCompositorMsPerSecond", "GPU compositor ms/s", LOWER],
@@ -126,6 +136,7 @@ const SWITCH_METRICS = [
   [(entry) => entry.content, "content ms"],
   [(entry) => entry.visible, "visible ms"],
   [(entry) => entry.longestTask, "longest task ms"],
+  [(entry) => entry.accessibility?.ms, "accessibility ms"],
   [(entry) => entry.shift?.maxPx, "shift after reveal px"],
   [(entry) => entry.requestCount, "requests"],
   [(entry) => entry.network?.decodedKb, "decoded KB"],
@@ -191,6 +202,14 @@ const seriesFor = (runs) => {
       for (const [read, label] of SWITCH_METRICS) push(`${visit} ${label}`, LOWER, entries.map(read))
     }
   }
+  if (kind === "toggle") {
+    // Pooled per toggle type: every measured toggle of every run is one sample.
+    const toggles = valid.flatMap((run) => measuredToggles(run.data.toggles ?? []))
+    for (const type of new Set(toggles.map((toggle) => toggle.type))) {
+      const ofType = toggles.filter((toggle) => toggle.type === type)
+      for (const [, label, read, shown] of TOGGLE_METRICS) if (shown) push(`${type} ${label}`, LOWER, ofType.map(read))
+    }
+  }
   if (kind === "startup") {
     const samples = valid.flatMap((run) => run.data.samples ?? []).filter((sample) => !sample.error)
     for (const [key, label] of STARTUP_MILESTONES) push(label, LOWER, samples.map((sample) => sample.msSinceSpawn?.[key]))
@@ -247,6 +266,34 @@ const componentTable = (beforeRuns, afterRuns) => {
   ]
 }
 
+/**
+ * Whether the runs built an accessibility tree. Chrome builds one only while a
+ * client asks (a screen reader, a macOS app that reads other windows, or
+ * `--force-accessibility`), and it adds a serialization pass to frames that
+ * change what it exposes, so runs with and without one do not compare.
+ */
+const accessibilityOf = (run) => {
+  const state = run.data.accessibility
+  if (!state?.recorded) return "not recorded"
+  if (!state.active) return "off"
+  return state.forced ? "on (forced)" : "on (client)"
+}
+
+const accessibilityLines = (beforeRuns, afterRuns) => {
+  const describe = (runs) => {
+    const counts = new Map()
+    for (const run of runs) counts.set(accessibilityOf(run), (counts.get(accessibilityOf(run)) ?? 0) + 1)
+    return counts
+  }
+  const before = describe(beforeRuns)
+  const after = describe(afterRuns)
+  if (before.size === 1 && after.size === 1 && before.has("not recorded") && after.has("not recorded")) return []
+  const text = (counts) => [...counts].map(([state, count]) => `${state} in ${count}`).join(", ")
+  const states = new Set([...before.keys(), ...after.keys()])
+  const differs = states.size > 1 && !(states.size === 2 && states.has("not recorded"))
+  return [`${differs ? "ACCESSIBILITY DIFFERS, timings do not compare: " : ""}accessibility tree before: ${text(before)}; after: ${text(after)}`]
+}
+
 /** Validity notes per side for one scenario. */
 const validityLines = (side, runs) => {
   const lines = []
@@ -295,7 +342,7 @@ export const compareResultDirs = (beforeRoot, afterRoot, { scenarios = [] } = {}
       lines.push(`| ${label} | ${formatSide(beforeStats)} | ${formatSide(afterStats)} | ${formatDelta(beforeStats, afterStats)} | ${verdictOf(beforeStats, afterStats, entry.lowerIsBetter)} |`)
     }
     lines.push(...componentTable(beforeRuns, afterRuns))
-    const validity = [...validityLines("before", beforeRuns), ...validityLines("after", afterRuns)]
+    const validity = [...validityLines("before", beforeRuns), ...validityLines("after", afterRuns), ...accessibilityLines(beforeRuns, afterRuns)]
     if (validity.length) lines.push("", ...validity.map((line) => `- ${line}`))
   }
   return lines.join("\n")

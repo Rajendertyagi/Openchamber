@@ -42,7 +42,6 @@ import {
   SettingsFieldRow,
   SettingsCheckboxRow,
   SettingsGroupTitle,
-  SETTINGS_SELECT_SIZE,
   SETTINGS_FIELD_LABEL_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
@@ -234,7 +233,7 @@ const CommandTextarea: React.FC<CommandTextareaProps> = ({
             <code className="typography-micro text-foreground/80 whitespace-pre">
               {value.map((a, i) => (
                 <span key={i} className="block">
-                  <span className="text-muted-foreground select-none mr-2">[{i}]</span>
+                  <span className="text-muted-foreground select-none me-2">[{i}]</span>
                   {a}
                 </span>
               ))}
@@ -410,7 +409,7 @@ const EnvEditor: React.FC<EnvEditorProps> = ({
                 value={entry.value}
                 onChange={(e) => updateRow(idx, 'value', e.target.value)}
                 placeholder={valuePlaceholder}
-                className="font-mono typography-meta pr-8 w-full"
+                className="font-mono typography-meta pe-8 w-full"
                 autoComplete="new-password"
                 data-bwignore="true"
                 data-1p-ignore="true"
@@ -420,7 +419,7 @@ const EnvEditor: React.FC<EnvEditorProps> = ({
               <button
                 type="button"
                 onClick={() => toggleReveal(idx)}
-                className="absolute right-2 text-muted-foreground/60 hover:text-muted-foreground"
+                className="absolute inset-e-2 text-muted-foreground/60 hover:text-muted-foreground"
                 title={revealedKeys.has(idx) ? hideValueTitle : showValueTitle}
               >
                 {revealedKeys.has(idx)
@@ -1297,7 +1296,7 @@ export const McpPage: React.FC = () => {
                     autoFocus
                   />
                   <Select value={draftScope} onValueChange={(value) => setDraftScope(value as McpScope)}>
-                    <SelectTrigger size={SETTINGS_SELECT_SIZE} className="!h-7 min-w-0 max-w-full gap-1.5 px-2">
+                    <SelectTrigger className="!h-7 min-w-0 max-w-full gap-1.5 px-2">
                       <Icon
                         name={draftScope === 'user' ? 'user-3' : 'folder'}
                         className="h-3.5 w-3.5 shrink-0"
@@ -1358,8 +1357,7 @@ export const McpPage: React.FC = () => {
               }}
               layoutMode="fit"
               variant="active-pill"
-              activePillLowercase={false}
-              className="h-10"
+              className="h-7"
             />
 
             {mcpType === 'local' ? (
@@ -1394,7 +1392,7 @@ export const McpPage: React.FC = () => {
                 onOpenChange={setIsAdvancedRemoteOptionsOpen}
               >
                 <CollapsibleTrigger className="flex w-full items-center justify-between py-0.5 group">
-                  <div className="flex items-center gap-1.5 text-left">
+                  <div className="flex items-center gap-1.5 text-start">
                     <span className="typography-ui-label font-normal text-foreground">{t('settings.mcp.page.advanced.configure')}</span>
                     {/* What is actually set, so a collapsed section is never a
                         blank promise. Everything at its default says nothing. */}
@@ -1427,7 +1425,6 @@ export const McpPage: React.FC = () => {
                         }}
                       >
                         <SelectTrigger
-                          size={SETTINGS_SELECT_SIZE}
                           className="!h-7 w-full max-w-[16rem] px-2"
                           aria-label={t('settings.mcp.page.advanced.protocol')}
                         >
@@ -1520,7 +1517,6 @@ export const McpPage: React.FC = () => {
                         }}
                       >
                         <SelectTrigger
-                          size={SETTINGS_SELECT_SIZE}
                           className="!h-7 w-full max-w-[16rem] px-2"
                           aria-label={t('settings.mcp.page.advanced.codemode')}
                         >
@@ -1541,7 +1537,7 @@ export const McpPage: React.FC = () => {
                       <SettingsGroupTitle as="div" className="mb-2">
                         {t('settings.mcp.page.advanced.requestHeaders')}
                         {headerEntries.length > 0 && (
-                          <span className="ml-1.5 typography-micro text-muted-foreground font-normal">({headerEntries.length})</span>
+                          <span className="ms-1.5 typography-micro text-muted-foreground font-normal">({headerEntries.length})</span>
                         )}
                       </SettingsGroupTitle>
                       <EnvEditor

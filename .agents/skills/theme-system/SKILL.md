@@ -24,7 +24,7 @@ description: Use when creating or modifying OpenChamber UI components, styling, 
 | Adding, converting, storing, or generating icons | `references/icons.md` |
 | Adding built-in or custom themes | `references/adding-themes.md` |
 
-Load every matching reference before editing. User-facing or accessible text must load `locale-ui-patterns`. Settings composition is owned by `settings-ui-patterns`, which declares `theme-system` as its one-way companion.
+Load every matching reference before editing. User-facing or accessible text must load `locale-ui-patterns`. Spacing, positioning and directional icons follow `rtl-layout`, which owns how a layout works in both directions. Settings composition is owned by `settings-ui-patterns`, which declares `theme-system` as its one-way companion.
 
 ## Token Decision
 
@@ -62,6 +62,8 @@ Use `Button` from `packages/ui/src/components/ui/button.tsx`.
 Do not hardcode button height/padding when a size variant exists. Do not recreate selection/destructive styling with ad-hoc classes.
 
 A button that opens a page, panel, or search field is a toggle: while what it opened is on screen it carries `aria-pressed` and the selection tokens, and the next click closes it. Closing a search field also clears its query, so the list never stays filtered by text nobody can see.
+
+Controls in one row share one height. Every dropdown trigger on desktop is 28px (`dropdownTriggerVariants()` default, `SelectTrigger`), in forms and toolbars alike. Toolbars, filter rows and the context panel header use 28px throughout: `Button size="sm"`, `<Input inputSize="compact">`, and the active-pill tab strip (its default). Form inputs and buttons stay 32px (`default`). Pick the size variant instead of overriding `h-*` at the call site to match a neighbour; mobile/touch branches keep their own larger sizes (`mobile`, `touch`).
 
 ## Keyboard Navigation Contract
 

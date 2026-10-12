@@ -39,7 +39,7 @@ commands at the printed URL with --dir <root>/project.
 Options:
   --repo <checkout>        Checkout whose server and CLI run (default: this one)
   --dist <directory>       Built UI to serve (default: <repo>/packages/web/dist;
-                           the diagnostic build is <repo>/packages/web/dist-diag)
+                           the diagnostic build is <repo>/tmp/web-dist-diag)
   --root <directory>       State, project and seed directories
                            (default: tmp/perf-serve)
   --fresh                  Restore state from <root>/seed before starting, or
@@ -250,6 +250,9 @@ const parseArgs = (argv) => {
 const main = async () => {
   const options = parseArgs(process.argv.slice(2))
   const state = join(options.root, "state")
+  // The fixture log is opened before startServer creates anything under the
+  // root, so a first run on a new --root needs the directory made here.
+  mkdirSync(options.root, { recursive: true })
   if (options.fresh) restoreState(state, join(options.root, "seed"))
   const fixture = await startFixture({ port: options.fixturePort, logFile: join(options.root, "fixture.log") })
   let server

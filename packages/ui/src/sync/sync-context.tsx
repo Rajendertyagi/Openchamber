@@ -79,7 +79,7 @@ import { refreshStoresForCatalogKind } from "@/stores/catalogRefresh"
 import { useMcpStore } from "@/stores/useMcpStore"
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { spaceIdOfDirectory } from "@/lib/spaces/space-route"
-import { isSpaceDirectoryStopped, isSpaceStopped, refreshSpacesJourney, useSpacesStore } from "@/lib/spaces/spaces-store"
+import { isDirectoryOfKnownSpace, isSpaceDirectoryStopped, isSpaceStopped, knownSpaceIds, refreshSpacesJourney, spaceIdsGone, spacesRuntimeGeneration, useSpacesStore } from "@/lib/spaces/spaces-store"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { toast } from "@/components/ui"
 import { appendNotification } from "./notification-store"
@@ -2524,6 +2524,23 @@ const dispatchOpenCodeUpdateAvailable = (payload: { version: string }) => {
   window.dispatchEvent(new CustomEvent("openchamber:opencode-update-available", { detail: payload }))
 }
 
+/**
+ * Moves the open chat of a space among `goneIds` to the directory the global list holds for it,
+ * the archive's. Answers whether there is nothing more to do: the chat moved, or the open chat
+ * is not one of those spaces' any more. False while the global list does not name the
+ * directory yet.
+ */
+const followCurrentChatToArchive = (goneIds: ReadonlySet<string>): boolean => {
+  const ui = useSessionUIStore.getState()
+  const current = normalizePath(ui.currentSessionDirectory)
+  const spaceId = spaceIdOfDirectory(current)
+  if (!ui.currentSessionId || spaceId === null || !goneIds.has(spaceId)) return true
+  const archived = normalizePath(useGlobalSessionsStore.getState().entityById.get(ui.currentSessionId)?.directory)
+  if (!archived || archived === current) return false
+  ui.setSessionDirectory(ui.currentSessionId, archived)
+  return true
+}
+
 export function SyncProvider(props: {
   sdk: OpenCodeClient
   directory: string
@@ -2537,7 +2554,11 @@ export function SyncProvider(props: {
   // selection as everywhere else ('auto' falls back to SSE on WS failure).
   const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport)
   const childStoresRef = useRef<ChildStoreManager | null>(null)
-  if (!childStoresRef.current) childStoresRef.current = new ChildStoreManager()
+  // The cached list of an isolated space's directory seeds a store only while this window knows
+  // the space: a deleted space's chats are on the Archive page, under the archive's own directory,
+  // and the space's prefix answers 404. Given here so a store a consumer makes during the first
+  // render, before `configure` runs, is gated too.
+  if (!childStoresRef.current) childStoresRef.current = new ChildStoreManager({ seedsSessions: isDirectoryOfKnownSpace })
   const childStores = childStoresRef.current
   const runtimeKey = getRuntimeKey()
   const messageLoaderRef = useRef<SessionMessageLoader | null>(null)
@@ -2550,6 +2571,11 @@ export function SyncProvider(props: {
   const messageLoader = messageLoaderRef.current
   const messageLoaderDisposalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   messageLoader.configure({ sdk: opencodeClient, runtimeKey })
+  // Asked while the rest of the bootstrap loads, so the first session page
+  // already arrives with its tool results shelled.
+  useEffect(() => {
+    opencodeClient.learnMessagePageShellsSupport()
+  }, [runtimeKey])
   const routingIndexRef = useRef<EventRoutingIndex | null>(null)
   if (!routingIndexRef.current) routingIndexRef.current = createEventRoutingIndex()
   const routingIndex = routingIndexRef.current
@@ -2806,6 +2832,37 @@ export function SyncProvider(props: {
       isLoadingSessions: () => false,
     })
   }, [childStores, messageLoader, props.sdk, routingIndex])
+
+  // A space that left both lists, deleted here or from another window, takes its directories
+  // with it: their stores and persisted caches go, so its chats show once, from the archive.
+  useEffect(() => {
+    let previous = knownSpaceIds(useSpacesStore.getState())
+    let generation = spacesRuntimeGeneration()
+    return useSpacesStore.subscribe((state) => {
+      const next = knownSpaceIds(state)
+      // A reset empties both lists without deleting anything: a runtime switch, whose stores go
+      // their own way, or the switch turned off, whose spaces come back with it.
+      const reset = spacesRuntimeGeneration() !== generation
+      generation = spacesRuntimeGeneration()
+      const gone = reset ? [] : spaceIdsGone(previous, next)
+      previous = next
+      if (gone.length === 0) return
+      const goneIds = new Set(gone)
+      for (const directory of Array.from(childStores.children.keys())) {
+        const spaceId = spaceIdOfDirectory(directory)
+        if (spaceId !== null && goneIds.has(spaceId)) childStores.forgetDirectory(directory)
+      }
+      // The open chat of a deleted space lives on under the archive's directory, which the
+      // global list names: the selection follows it there, so the chat reads as the archive,
+      // read-only, and not through the prefix the host answers with 404. The marks are applied
+      // before the global snapshot that carries them, and the archive record may be on a later
+      // page, so the move waits for the global store to name the directory.
+      if (followCurrentChatToArchive(goneIds)) return
+      const unsubscribe = useGlobalSessionsStore.subscribe(() => {
+        if (followCurrentChatToArchive(goneIds)) unsubscribe()
+      })
+    })
+  }, [childStores])
 
   // Bootstrap global state — set bootingRoot/bootedAt to suppress
   // redundant refresh events during startup
@@ -3441,26 +3498,27 @@ export function useSessionForms(sessionID: string, directory?: string) {
   )
 }
 
-type SessionBlockingRequestCounts = {
-  permissionCount: number
-  formCount: number
+type SessionBlockingRequests = {
+  hasPermission: boolean
+  hasForm: boolean
 }
 
-const EMPTY_SESSION_BLOCKING_REQUEST_COUNTS: SessionBlockingRequestCounts = {
-  permissionCount: 0,
-  formCount: 0,
+const NO_SESSION_BLOCKING_REQUESTS: SessionBlockingRequests = {
+  hasPermission: false,
+  hasForm: false,
 }
 
 /**
- * Count pending permissions and forms across exact session buckets grouped
- * by owning directory. This lets collapsed rows cover hidden descendants
- * without bootstrapping their stores or subscribing to unrelated updates.
+ * Whether any pending permission or form waits in exact session buckets
+ * grouped by owning directory. This lets collapsed rows cover hidden
+ * descendants without bootstrapping their stores or subscribing to unrelated
+ * updates.
  */
-export function useSessionBlockingRequestCounts(
+export function useSessionBlockingRequests(
   scopes: readonly { directory: string; sessionIDs: readonly string[] }[],
-): SessionBlockingRequestCounts {
+): SessionBlockingRequests {
   // Runtime only: the current directory is not an input here, and reading the
-  // directory-bearing context would re-render every sidebar row that counts
+  // directory-bearing context would re-render every sidebar row that shows
   // blocking requests whenever the user switches projects.
   const { childStores } = useSyncRuntime()
   const scopedStores = React.useMemo(() => scopes.map((scope) => ({
@@ -3473,22 +3531,22 @@ export function useSessionBlockingRequestCounts(
       for (const scope of scopes) childStores.unpin(scope.directory)
     }
   }, [childStores, scopes])
-  const snapshotRef = useRef(EMPTY_SESSION_BLOCKING_REQUEST_COUNTS)
+  const snapshotRef = useRef(NO_SESSION_BLOCKING_REQUESTS)
   const getSnapshot = React.useCallback(() => {
-    let permissionCount = 0
-    let formCount = 0
+    let hasPermission = false
+    let hasForm = false
     for (const { sessionIDs, store } of scopedStores) {
       const { permission: permissions, form: forms } = store.getState()
       for (const sessionID of sessionIDs) {
-        permissionCount += permissions[sessionID]?.length ?? 0
-        formCount += forms[sessionID]?.length ?? 0
+        hasPermission ||= Boolean(permissions[sessionID]?.length)
+        hasForm ||= Boolean(forms[sessionID]?.length)
       }
     }
     const previous = snapshotRef.current
-    if (previous.permissionCount === permissionCount && previous.formCount === formCount) {
+    if (previous.hasPermission === hasPermission && previous.hasForm === hasForm) {
       return previous
     }
-    const next = { permissionCount, formCount }
+    const next = { hasPermission, hasForm }
     snapshotRef.current = next
     return next
   }, [scopedStores])

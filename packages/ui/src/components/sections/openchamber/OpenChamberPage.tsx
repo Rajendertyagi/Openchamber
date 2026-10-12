@@ -161,8 +161,11 @@ const GeneralSectionContent: React.FC = () => {
             {!isVSCode && <OpenChamberToolsSettings />}
             <OpenChamberVisualSettings visibleSettings={[
                 'fileEditorKeymap',
+                ...(!isVSCode ? ['fileTreeSide' as const] : []),
                 ...(!isVSCode ? ['sessionTabs' as const] : []),
                 'autoSaveEnabled',
+                ...(!isVSCode ? ['confirmFileTreeMove' as const] : []),
+                ...(!isVSCode ? ['layoutAnimations' as const] : []),
                 ...(!isVSCode ? ['terminalQuickKeys' as const] : []),
                 ...(!isVSCode ? ['terminalShell' as const] : []),
                 ...(!isVSCode ? ['terminalLoginShell' as const] : []),
@@ -208,7 +211,6 @@ const ChatSectionContent: React.FC = () => {
                 'reasoning',
                 'showToolFileIcons',
                 'showTurnChangedFiles',
-                'expandedTools',
                 'collapsibleUserMessages',
                 'stickyUserHeader',
                 'promptNavigatorEnabled',

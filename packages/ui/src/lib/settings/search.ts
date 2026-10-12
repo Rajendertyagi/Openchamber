@@ -176,6 +176,28 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['editor', 'autosave', 'auto-save', 'files', 'save'],
   },
   {
+    id: 'appearance.confirm-file-tree-move',
+    page: 'general',
+    titleKey: 'settings.openchamber.visual.field.confirmFileTreeMove',
+    keywords: ['files', 'tree', 'move', 'drag', 'drop', 'confirm'],
+    isAvailable: (ctx) => !ctx.isMobile && !ctx.isVSCode,
+  },
+  {
+    id: 'appearance.file-tree-side',
+    page: 'general',
+    titleKey: 'settings.openchamber.visual.field.fileTreeSide',
+    keywords: ['files', 'tree', 'explorer', 'left', 'right', 'side', 'editor'],
+    isAvailable: (ctx) => !ctx.isMobile && !ctx.isVSCode,
+  },
+  {
+    id: 'appearance.layout-animations',
+    page: 'general',
+    titleKey: 'settings.openchamber.visual.field.layoutAnimations',
+    descriptionKey: 'settings.openchamber.visual.field.layoutAnimationsInfo',
+    keywords: ['animation', 'motion', 'sidebar', 'panel', 'slide', 'instant'],
+    isAvailable: (ctx) => !ctx.isMobile && !ctx.isVSCode,
+  },
+  {
     id: 'appearance.file-editor-keymap',
     page: 'general',
     titleKey: 'settings.openchamber.visual.field.fileEditorKeymap',
@@ -525,29 +547,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'sessions',
     titleKey: 'settings.openchamber.sessionWork.title',
     descriptionKey: 'settings.openchamber.sessionWork.info',
-    keywords: ['in work', 'in progress', 'track', 'done', 'inbox', 'sidebar', 'jev'],
+    keywords: ['in work', 'in progress', 'track', 'done', 'inbox', 'sidebar', 'recent', 'jev'],
   },
   {
     id: 'sessions.work-enabled',
     page: 'sessions',
     titleKey: 'settings.openchamber.sessionWork.field.enabled',
     keywords: ['in work', 'in progress', 'track', 'done', 'sidebar'],
-  },
-  {
-    id: 'sessions.work-auto-open',
-    page: 'sessions',
-    titleKey: 'settings.openchamber.sessionWork.field.autoOpen',
-    descriptionKey: 'settings.openchamber.sessionWork.field.autoOpenInfo',
-    keywords: ['in work', 'automatic', 'jev', 'classification', 'track'],
-    // Jev runs on the OpenChamber server; VS Code has only the manual part.
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'sessions.work-keep-in-group',
-    page: 'sessions',
-    titleKey: 'settings.openchamber.sessionWork.field.keepInGroup',
-    descriptionKey: 'settings.openchamber.sessionWork.field.keepInGroupInfo',
-    keywords: ['in work', 'track', 'project group', 'folder', 'sidebar', 'keep'],
   },
   {
     id: 'sessions.small-model',
@@ -721,6 +727,15 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     descriptionKey: 'settings.openchamber.tools.field.agentControlToolInfo',
     keywords: ['agent', 'tool', 'orchestration', 'openchamber', 'sessions', 'schedule', 'control'],
     isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'sessions.agent-worktree-move',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.field.agentWorktreeMove',
+    descriptionKey: 'settings.openchamber.tools.field.agentWorktreeMoveInfo',
+    keywords: ['agent', 'worktree', 'branch', 'move', 'session', 'ask', 'pull request'],
+    // Rendered only under a switched-on control tool.
+    isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentControlToolEnabled,
   },
   {
     id: 'sessions.agent-web-tool',

@@ -23,18 +23,19 @@ import { spawn } from "node:child_process"
 import { createWriteStream } from "node:fs"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { finished } from "node:stream/promises"
-import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import process from "node:process"
 
-import { CdpClient, createPageTarget, evaluateValue, findPageTarget, launchChrome, reservePort, resolveChrome, wait } from "./perf/cdp.mjs"
+import { ACCESSIBILITY_CATEGORY, accessibilityInWindow, accessibilityState, describeAccessibility, FORCE_ACCESSIBILITY_ARGS } from "./perf/accessibility.mjs"
+import { CdpClient, createPageTarget, evaluateValue, findPageTarget, launchChrome, reservePort, resolveChrome, resolveProfileDir, wait } from "./perf/cdp.mjs"
 import { buildIdleProbeSource, IDLE_PROBE_GLOBAL } from "./perf/idle-probe.mjs"
 import { summarizeCpuProfile } from "./perf/cpu-profile.mjs"
 import { growthPerSecond, longestTaskInWindow, metricMap, round, summarizeFrameBudget, summarizeLongTasks, summarizeThreads, summarizeTraceEvents } from "./perf/metrics.mjs"
 import { createProcessCpuSampler, openBrowserClient, resolveServerProcesses } from "./perf/process-cpu.mjs"
 import { buildRenderProbeSource, printRenderProbe, readRenderProbe, RENDER_PROBE_GLOBAL, summarizeRenderProbe } from "./perf/render-probe.mjs"
 import { expandProjects, expandSessionLists } from "./perf/scenario.mjs"
+import { rendererMainThread, traceWindow } from "./perf/trace-analysis.mjs"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const cliPath = join(repoRoot, "packages/web/bin/cli.js")
@@ -72,7 +73,8 @@ Options:
   --output <directory>     Artifact directory
   --label <text>           Human label stored in the summary
   --chrome <path>          Chrome/Chromium executable
-  --profile-dir <path>     Reusable isolated Chrome profile
+  --profile-dir <path>     Chrome profile to reuse (default: a fresh temporary
+                           profile per run, removed afterwards)
   --headed                 Show the browser (default: headless)
   --attach <port>          Measure a browser that is already running and
                            exposes CDP on this port, such as the desktop shell
@@ -91,7 +93,12 @@ Options:
                            DevTools Performance panel and Perfetto both open.
   --extra-categories <list> Comma-separated trace categories to add, such as
                            disabled-by-default-devtools.timeline.invalidationTracking
-                           (names what invalidated each style recalc)
+                           (names what invalidated each style recalc). The
+                           accessibility category is always recorded
+  --force-accessibility    Launch Chrome with its accessibility tree on, as an
+                           accessibility client turns it on (a screen reader,
+                           or a macOS app that reads other windows), so every
+                           machine and headless runs measure that case
   --render-probe           Count renders per component, renders that changed
                            nothing in the DOM, store notifications and DOM
                            mutations per region (scripts/perf/render-probe.mjs).
@@ -114,6 +121,9 @@ Options:
                            describes a modified app and is labelled as such.
   --inject-script <file>   Run a script in the page before it loads. Same
                            purpose and the same labelling as --inject-css.
+                           When the script defines
+                           globalThis.__perfInjected.snapshot(), its result
+                           is saved to injected-probe.json after the tail.
   --baseline <directory>   Compare against a previous run directory
   --budget-long-tasks <n>  Fail when long tasks exceed this count
   --budget-longest <ms>    Fail when the longest task exceeds this
@@ -141,7 +151,7 @@ const parseArgs = (argv) => {
     output: null,
     label: null,
     chrome: null,
-    profileDir: join(homedir(), ".openchamber", "browser-profile-google-chrome"),
+    profileDir: null,
     headless: true,
     attach: null,
     samplingInterval: 200,
@@ -152,6 +162,7 @@ const parseArgs = (argv) => {
     injectScript: null,
     quiet: 0,
     extraCategories: [],
+    forceAccessibility: false,
     renderProbe: false,
     renderProbeHook: null,
     heapSampling: false,
@@ -193,6 +204,7 @@ const parseArgs = (argv) => {
     else if (value === "--inject-script") options.injectScript = argv[++index]
     else if (value === "--quiet") options.quiet = Number(argv[++index])
     else if (value === "--extra-categories") options.extraCategories = String(argv[++index]).split(",").map((category) => category.trim()).filter(Boolean)
+    else if (value === "--force-accessibility") options.forceAccessibility = true
     else if (value === "--render-probe") options.renderProbe = true
     else if (value === "--render-probe-hook") options.renderProbeHook = argv[++index]
     else if (value === "--heap-sampling") options.heapSampling = true
@@ -250,16 +262,29 @@ const runSessionCli = (args, { timeoutMs = 900_000 } = {}) => new Promise((resol
  * profile, so the run verifies rendering rather than assuming it.
  */
 const countRenderedMessages = async (client) => {
+  // Text per mounted message, not the page's text: a virtualised timeline
+  // unmounts the rows that scroll out above while the reply grows below, so in
+  // a long session the page's text shrinks while a whole reply streams in.
   const raw = await evaluateValue(client, `JSON.stringify({
     messages: document.querySelectorAll("[data-message-id]").length,
     characters: document.body.innerText.length,
+    perMessage: Object.fromEntries([...document.querySelectorAll("[data-message-id]")]
+      .map((element) => [element.getAttribute("data-message-id"), element.innerText.length])),
   })`)
   try {
     return JSON.parse(raw ?? "{}")
   } catch {
-    return { messages: 0, characters: 0 }
+    return { messages: 0, characters: 0, perMessage: {} }
   }
 }
+
+/**
+ * Message text that appeared during the capture: what new messages hold plus
+ * what messages present before gained. Rows that unmounted are skipped
+ * rather than counted as lost text.
+ */
+const messageTextGrowth = (before, after) => Object.entries(after.perMessage ?? {})
+  .reduce((total, [id, length]) => total + Math.max(0, length - (before.perMessage?.[id] ?? 0)), 0)
 
 /**
  * Reads which directory the app has active and which one owns the session.
@@ -297,7 +322,10 @@ const readAssistantResponse = async (cliBase, sessionId) => {
   return {
     responded: assistant.length > 0,
     messages: assistant.length,
+    // Summed over the page of messages the CLI returns, which in a reused
+    // session includes earlier replies; `replyCharacters` is this reply's own.
     textCharacters: assistant.reduce((total, message) => total + (message.text?.length ?? 0), 0),
+    replyCharacters: assistant.at(-1)?.text?.length ?? 0,
   }
 }
 
@@ -409,11 +437,13 @@ const REPORTED_METRICS = [
   { key: "longestTaskMs", fromTrace: true, label: "Longest task", unit: "ms", lowerIsBetter: true },
   { key: "taskP95Ms", fromTrace: true, label: "Task p95", unit: "ms", lowerIsBetter: true },
   { key: "taskP99Ms", fromTrace: true, label: "Task p99", unit: "ms", lowerIsBetter: true },
+  { key: "accessibilityMs", fromTrace: true, label: "Accessibility", unit: "ms", lowerIsBetter: true },
+  { key: "accessibilityLongestPassMs", fromTrace: true, label: "Longest a11y pass", unit: "ms", lowerIsBetter: true },
   { key: "blockedPercent", fromTrace: true, label: "Time in long tasks", unit: "%", lowerIsBetter: true },
   { key: "mainThreadBusyPercent", label: "Main-thread busy", unit: "%", lowerIsBetter: true },
   { key: "recalcStylePerSecond", label: "Style recalcs/sec", unit: "", lowerIsBetter: true },
   { key: "layoutsPerSecond", label: "Layouts/sec", unit: "", lowerIsBetter: true },
-  { key: "framesPerSecond", fromTrace: true, label: "Animation frames/sec", unit: "", lowerIsBetter: false },
+  { key: "framesPerSecond", fromTrace: true, label: "rAF callbacks/sec", unit: "", lowerIsBetter: false },
   { key: "streamSeconds", label: "Stream duration", unit: "s", lowerIsBetter: true },
   { key: "renderedCharacters", label: "Rendered characters", unit: "", lowerIsBetter: false },
   { key: "busyMsPerKilochar", label: "Busy per 1k chars", unit: "ms", lowerIsBetter: true },
@@ -439,6 +469,8 @@ const printReport = (summary, baseline) => {
   console.log("")
   if (summary.instrumented === false) {
     console.log("Uninstrumented run: trace, sampler and probe were off, so their metrics are omitted rather than shown as zero.\n")
+  } else if (summary.accessibility) {
+    console.log(`${describeAccessibility(summary.accessibility)}\n`)
   }
   for (const metric of REPORTED_METRICS) {
     if (metric.fromTrace && summary.instrumented === false) continue
@@ -560,9 +592,10 @@ const main = async () => {
   const chrome = attached ? null : resolveChrome(options.chrome)
   const timestamp = new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-")
   const output = resolve(options.output ?? join("artifacts", `session-profile-${timestamp}`))
-  const profileDir = resolve(options.profileDir)
+  const profile = attached ? null : resolveProfileDir(options.profileDir, "session")
+  const profileDir = profile?.dir ?? null
   await mkdir(output, { recursive: true })
-  await mkdir(profileDir, { recursive: true })
+  if (profileDir) await mkdir(profileDir, { recursive: true })
 
   const baseline = options.baseline
     ? JSON.parse(await readFile(join(resolve(options.baseline), "session-summary.json"), "utf8"))
@@ -583,7 +616,8 @@ const main = async () => {
   }
 
   const port = attached ? options.attach : await reservePort()
-  const chromeProcess = attached ? null : launchChrome({ chrome, profileDir, port, headless: options.headless })
+  if (attached && options.forceAccessibility) throw new Error("--force-accessibility launches Chrome; it does not apply with --attach")
+  const chromeProcess = attached ? null : launchChrome({ chrome, profileDir, port, headless: options.headless, extraArgs: options.forceAccessibility ? FORCE_ACCESSIBILITY_ARGS : [] })
   let client
   let browserClient
   try {
@@ -688,21 +722,20 @@ const main = async () => {
       await client.send("HeapProfiler.enable")
       await client.send("HeapProfiler.startSampling", { samplingInterval: 32768, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true })
     }
-    if (instrumented) await client.send("Tracing.start", {
-      transferMode: "ReportEvents",
-      // `RunTask` is only emitted under the disabled-by-default timeline
-      // category. Without it the capture silently reports zero long tasks.
-      categories: [
-        "devtools.timeline",
-        "disabled-by-default-devtools.timeline",
-        "disabled-by-default-devtools.timeline.frame",
-        "blink.user_timing",
-        // `toplevel` wraps every task on every thread of every process; the
-        // rest name what the compositor and the GPU process did inside them.
-        ...(options.threadBreakdown ? ["toplevel", "cc", "viz", "gpu", "v8.gc", "disabled-by-default-v8.gc"] : []),
-        ...options.extraCategories,
-      ].join(","),
-    })
+    // `RunTask` is only emitted under the disabled-by-default timeline
+    // category. Without it the capture silently reports zero long tasks.
+    const categories = [...new Set([
+      "devtools.timeline",
+      "disabled-by-default-devtools.timeline",
+      "disabled-by-default-devtools.timeline.frame",
+      "blink.user_timing",
+      ACCESSIBILITY_CATEGORY,
+      // `toplevel` wraps every task on every thread of every process; the
+      // rest name what the compositor and the GPU process did inside them.
+      ...(options.threadBreakdown ? ["toplevel", "cc", "viz", "gpu", "v8.gc", "disabled-by-default-v8.gc"] : []),
+      ...options.extraCategories,
+    ])]
+    if (instrumented) await client.send("Tracing.start", { transferMode: "ReportEvents", categories: categories.join(",") })
 
     const before = metricMap((await client.send("Performance.getMetrics")).metrics)
     const renderedBefore = await countRenderedMessages(client)
@@ -829,15 +862,20 @@ const main = async () => {
     const streamPerformance = await evaluateValue(client, `window.__openchamberStreamPerformance?.getSnapshot() ?? null`)
     const syncCounters = await evaluateValue(client, `window.__openchamberSyncPerformance?.getSnapshot() ?? null`)
     const renderProbeRaw = options.renderProbe ? await readRenderProbe((expression) => evaluateValue(client, expression)) : null
+    // An injected script may expose `globalThis.__perfInjected.snapshot()` to
+    // hand back what it recorded, such as per-frame scroll positions.
+    const injectedProbeRaw = options.injectScript
+      ? await evaluateValue(client, `JSON.stringify(globalThis.__perfInjected?.snapshot?.() ?? null)`)
+      : null
     const dispatchResult = await dispatch.catch(() => null)
 
     // Both signals must agree: new message elements in the DOM and the
     // application's own message-list render counters firing.
     const messageListRendered = (streamPerformance?.entries ?? [])
       .some((entry) => entry.metric.startsWith("ui.message_list") && entry.count > 0)
-    const renderedCharacterGrowth = renderedAfter.characters - renderedBefore.characters
+    const renderedCharacterGrowth = messageTextGrowth(renderedBefore, renderedAfter)
     // A virtualised timeline keeps the mounted message count constant, so in a
-    // long session new text is the DOM signal and a new element is not. An
+    // long session new message text is the DOM signal and a new element is not. An
     // uninstrumented run has no render counters and relies on the DOM signal
     // together with the assistant-response check.
     const domGrew = renderedAfter.messages > renderedBefore.messages || renderedCharacterGrowth > 0
@@ -855,6 +893,10 @@ const main = async () => {
       ? longestTaskInWindow(traceEvents, sessionIdle.micros, sessionIdle.micros + 1_000_000)
       : null
     const traceBreakdown = summarizeTraceEvents(traceEvents)
+    const recordedWindow = traceWindow(traceEvents)
+    const accessibility = instrumented
+      ? accessibilityInWindow(traceEvents, { main: rendererMainThread(traceEvents, recordedWindow).main, ...recordedWindow, recorded: true })
+      : null
     const threadBreakdown = options.threadBreakdown ? summarizeThreads(traceEvents) : null
     const delta = (name) => Number(after[name] ?? 0) - Number(before[name] ?? 0)
     const perSecond = (name) => round(delta(name) / elapsedSeconds)
@@ -889,6 +931,7 @@ const main = async () => {
       traceComplete,
       disposableSession: !options.keepSession && !options.session,
       sessionIdle,
+      accessibility: instrumented ? accessibilityState(traceEvents, { categories, forced: options.forceAccessibility }) : null,
       metrics: {
         ...tasks,
         ...frameBudget,
@@ -896,11 +939,17 @@ const main = async () => {
         // code highlights, the list re-measures) right after the session goes idle.
         finalizeLongestTaskMs: finalize?.longestMs ?? null,
         finalizeTasksOver16msCount: finalize?.tasksOver16msCount ?? null,
+        // Serializing the accessibility tree, paid only while an accessibility
+        // client is on (`accessibility` says whether it was).
+        accessibilityMs: accessibility?.ms ?? null,
+        accessibilityLongestPassMs: accessibility?.longestPassMs ?? null,
         blockedPercent: round((tasks.longTaskTotalMs / (elapsedSeconds * 1000)) * 100),
         mainThreadBusyPercent: round((delta("TaskDuration") / elapsedSeconds) * 100),
         recalcStylePerSecond: perSecond("RecalcStyleCount"),
         layoutsPerSecond: perSecond("LayoutCount"),
-        framesPerSecond: round(Number(probe?.counters?.rafScheduled ?? 0) / elapsedSeconds),
+        // requestAnimationFrame calls the page made, not frames drawn; frames
+        // are `framesSubmittedPerSecond` from the saved trace.
+        framesPerSecond: probe ? round(Number(probe.counters?.rafScheduled ?? 0) / elapsedSeconds) : null,
         // Response length varies between runs even for an identical prompt, so
         // per-second and total figures are not comparable across captures.
         // Normalising by rendered output is what makes two runs contrastable.
@@ -940,6 +989,7 @@ const main = async () => {
     if (profile) await writeFile(join(output, "cpu-profile.cpuprofile"), JSON.stringify(profile))
     if (heapProfile) await writeFile(join(output, "heap.heapprofile"), JSON.stringify(heapProfile))
     if (renderProbeRaw) await writeFile(join(output, "render-probe.json"), renderProbeRaw)
+    if (injectedProbeRaw && injectedProbeRaw !== "null") await writeFile(join(output, "injected-probe.json"), injectedProbeRaw)
     if (options.saveTrace && instrumented) {
       // Streamed event by event: one JSON.stringify over a long capture exceeds
       // the maximum string length.
@@ -1007,6 +1057,7 @@ const main = async () => {
     client?.close()
     browserClient?.close()
     if (chromeProcess && !chromeProcess.killed) chromeProcess.kill("SIGTERM")
+    profile?.removeAfter(chromeProcess)
   }
 }
 
