@@ -4,7 +4,7 @@ import { colorHue, contrastRatio, mixColor, onColor, readableText, tintColor, wi
 
 // Share of the primary's hue and chroma a user bubble takes on, at the
 // bubble's own lightness. The same chroma reads stronger on a light canvas.
-const BUBBLE_TINT = { dark: 0.16, light: 0.1 } as const;
+const BUBBLE_TINT = { dark: 0.16, light: 0.06 } as const;
 
 // Both file imports and live VS Code palettes pass through this policy once.
 export function adaptVSCodeRoles(theme: Theme, authored: Readonly<VSCodeThemePalette['colors']>, highContrast = false): void {
@@ -53,9 +53,9 @@ export function adaptVSCodeRoles(theme: Theme, authored: Readonly<VSCodeThemePal
     toward(seed, canvas, (color) => contrast(color, canvas) <= ceiling),
     neutral, (color) => minimum(color) >= floor,
   );
-  surface.foreground = text(surface.foreground, dark ? 10 : 9, 7);
+  surface.foreground = text(surface.foreground, dark ? 13.6 : 9, 7);
   surface.mutedForeground = text(surface.mutedForeground, Math.min(6, contrast(surface.foreground, canvas) * 0.7));
-  surface.elevatedForeground = text(surface.elevatedForeground, dark ? 10 : 9, 7);
+  surface.elevatedForeground = text(surface.elevatedForeground, dark ? 13.6 : 9, 7);
 
   const accents = [authored['button.background'], authored['textLink.foreground'], authored['activityBarBadge.background'], authored['list.highlightForeground'], authored.focusBorder];
   primary.base = readable(accents.find((color) => color !== undefined && minimum(color) >= 3) ?? primary.base);
@@ -166,6 +166,9 @@ export function adaptVSCodeRoles(theme: Theme, authored: Readonly<VSCodeThemePal
     markdown.inlineCodeBackground = surface.subtle;
     markdown.inlineCode = readableText(readable(authored['textPreformat.foreground'] ?? primary.base), surface.subtle, canvas);
   }
-  syntax.base.background = toward(syntax.base.background, canvas, (color) => contrast(color, canvas) <= 1.1);
+  // Code keeps its own lightness but takes the canvas hue, so a neutral source
+  // code fill does not sit as a cold slab inside a warm or tinted theme.
+  syntax.base.background = toward(tintColor(canvas, syntax.base.background, 1, canvas), canvas,
+    (color) => contrast(color, canvas) <= 1.1);
   syntax.base.foreground = readableText(surface.foreground, syntax.base.background, canvas);
 }
