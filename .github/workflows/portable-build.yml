@@ -15,7 +15,7 @@ jobs:
       APP_NAME: OpenChamber
       ARCH: x64
       PLATFORM: win
-      BUN_VERSION: "1.4.2"
+      BUN_VERSION: "1.4.3"
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -30,7 +30,7 @@ jobs:
           restore-keys: |
             bun-${{ runner.os }}-v
 
-      - name: Setup Bun (pin 1.4.2)
+      - name: Setup Bun (pin 1.4.3)
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
@@ -152,7 +152,7 @@ jobs:
         with:
           name: ${{ env.APP_NAME }}-portable-${{ env.PLATFORM }}-${{ env.ARCH }}
           path: packages/electron/dist/${{ env.APP_NAME }}
-          retention-days: 7
+          retention-days: 3
           if-no-files-found: error
 
       - name: Clean up temporary build files
