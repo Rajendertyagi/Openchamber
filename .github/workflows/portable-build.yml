@@ -14,7 +14,7 @@ concurrency:
 jobs:
   build-windows-portable:
     name: Build Windows Portable x64
-    runs-on: windows-2025            # was windows-2022 (deprecated image)
+    runs-on: windows-2025
     timeout-minutes: 60
     env:
       APP_NAME: OpenChamber
@@ -32,6 +32,7 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
 
       - name: Cache Bun install store
+        id: cache-bun
         uses: actions/cache@v4
         with:
           path: ~/.bun/install/cache
@@ -46,6 +47,7 @@ jobs:
           bun --version
 
       - name: Cache Electron + electron-builder binaries
+        id: cache-electron
         uses: actions/cache@v4
         with:
           path: |
@@ -59,32 +61,17 @@ jobs:
         shell: bash
         run: bun install --frozen-lockfile
 
-      - name: Build web UI
-        working-directory: packages/electron
-        shell: bash
-        run: bun run build:web-assets
-
-      - name: Prepare OpenCode CLI
+      - name: Build & prepare (parallel)
         working-directory: packages/electron
         shell: bash
         run: |
-          bun run prepare:opencode-cli
-          bun run verify:opencode-cli
-
-      - name: Prepare ripgrep
-        working-directory: packages/electron
-        shell: bash
-        run: bun run prepare:ripgrep
-
-      - name: Bundle main process
-        working-directory: packages/electron
-        shell: bash
-        run: bun run bundle:main
-
-      - name: Rebuild native modules
-        working-directory: packages/electron
-        shell: bash
-        run: bun run rebuild:native
+          bun run build:web-assets &
+          bun run prepare:opencode-cli && bun run verify:opencode-cli &
+          bun run prepare:ripgrep &
+          bun run bundle:main &
+          wait
+          echo "✓ All parallel tasks finished, rebuilding native modules..."
+          bun run rebuild:native
 
       - name: Package portable build
         working-directory: packages/electron
@@ -151,7 +138,7 @@ jobs:
         with:
           name: ${{ env.APP_NAME }}-portable-${{ env.PLATFORM }}-${{ env.ARCH }}
           path: packages/electron/dist/${{ env.APP_NAME }}
-          retention-days: 3        # keep 3 days, not the default 90 — saves storage
+          retention-days: 3
           if-no-files-found: error
 
       - name: Clean up temporary build files
