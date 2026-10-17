@@ -14,13 +14,18 @@ concurrency:
 jobs:
   build-windows-portable:
     name: Build Windows Portable x64
-    runs-on: windows-2025
+    runs-on: windows-2022
     timeout-minutes: 60
     env:
       APP_NAME: OpenChamber
       ARCH: x64
       PLATFORM: win
       BUN_VERSION: "1.4.3"
+      # Pin electron/electron-builder download caches to workspace paths
+      # (electron-builder docs: env var must be absolute; workspace-relative
+      # makes actions/cache save/restore deterministic).
+      ELECTRON_CACHE: ${{ github.workspace }}\.cache\electron
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}\.cache\electron-builder
 
     steps:
       - name: Checkout
@@ -32,7 +37,7 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
 
       - name: Cache Bun install store
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ env.BUN_VERSION }}-${{ hashFiles('bun.lock') }}
@@ -45,30 +50,26 @@ jobs:
           echo "bun --version:"
           bun --version
 
-      - name: Cache Electron + electron-builder binaries
-        uses: actions/cache@v4
+      - name: Cache Electron + electron-builder toolsets
+        uses: actions/cache@v6
         with:
           path: |
-            ~\AppData\Local\electron
-            ~\.cache\electron-builder
-          key: electron-${{ runner.os }}-${{ hashFiles('packages/electron/package.json') }}
-          restore-keys: |
-            electron-${{ runner.os }}-
+            .cache/electron
+            .cache/electron-builder
+          key: eb-${{ runner.os }}-${{ hashFiles('packages/electron/package.json') }}
+
+      - name: Install dependencies
+        shell: bash
+        run: bun install --frozen-lockfile
 
       - name: Cache native prebuilds
         id: cache-native
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             node_modules/node-pty/build
             node_modules/bun-pty/build
           key: native-${{ runner.os }}-${{ hashFiles('packages/electron/package.json') }}
-          # No restore-keys: exact match only, so an Electron upgrade
-          # can never restore prebuilds compiled for an older version.
-
-      - name: Install dependencies
-        shell: bash
-        run: bun install --frozen-lockfile
 
       - name: Build & prepare (parallel)
         working-directory: packages/electron
@@ -83,12 +84,10 @@ jobs:
           wait $pid_cli; s_cli=$?
           wait $pid_rg; s_rg=$?
           wait $pid_bundle; s_bundle=$?
-          echo "✓ Parallel tasks finished: web=$s_web cli=$s_cli ripgrep=$s_rg bundle=$s_bundle"
-
-          # A plain `wait` only returns the LAST job's status, so check each:
+          echo "Parallel tasks: web=$s_web cli=$s_cli ripgrep=$s_rg bundle=$s_bundle"
           [ $((s_web + s_cli + s_rg + s_bundle)) -eq 0 ] || exit 1
 
-      - name: Rebuild native modules (skip on cache hit)
+      - name: Rebuild native modules (skip on prebuild cache hit)
         if: steps.cache-native.outputs.cache-hit != 'true'
         working-directory: packages/electron
         shell: bash
