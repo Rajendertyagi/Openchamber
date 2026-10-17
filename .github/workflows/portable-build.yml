@@ -21,6 +21,11 @@ jobs:
       ARCH: x64
       PLATFORM: win
       BUN_VERSION: "1.4.3"
+      # Pin electron/electron-builder download caches to workspace paths
+      # (per electron-builder docs: must be absolute; workspace-relative is
+      # what makes actions/cache save/restore them deterministically).
+      ELECTRON_CACHE: ${{ github.workspace }}\.cache\electron
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}\.cache\electron-builder
 
     steps:
       - name: Checkout
@@ -35,10 +40,22 @@ jobs:
         id: cache-bun
         uses: actions/cache@v4
         with:
+          # Bun's global package store: %USERPROFILE%\.bun\install\cache on Windows
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ env.BUN_VERSION }}-${{ hashFiles('bun.lock') }}
           restore-keys: |
             bun-${{ runner.os }}-${{ env.BUN_VERSION }}-
+
+      - name: Cache Electron + electron-builder toolsets
+        id: cache-electron
+        uses: actions/cache@v4
+        with:
+          # Populated via ELECTRON_CACHE / ELECTRON_BUILDER_CACHE env vars above.
+          # Covers the Electron zip AND NSIS/winCodeSign/7zip toolsets.
+          path: |
+            .cache/electron
+            .cache/electron-builder
+          key: eb-${{ runner.os }}-${{ hashFiles('packages/electron/package.json') }}
 
       - name: Verify Bun version
         shell: bash
@@ -46,32 +63,43 @@ jobs:
           echo "bun --version:"
           bun --version
 
-      - name: Cache Electron + electron-builder binaries
-        id: cache-electron
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~\AppData\Local\electron
-            ~\.cache\electron-builder
-          key: electron-${{ runner.os }}-${{ hashFiles('packages/electron/package.json') }}
-          restore-keys: |
-            electron-${{ runner.os }}-
-
       - name: Install dependencies
         shell: bash
         run: bun install --frozen-lockfile
+
+      - name: Cache native prebuilds
+        id: cache-native
+        uses: actions/cache@v4
+        with:
+          # Restored AFTER install (on top of fresh node_modules).
+          # Exact key only — no restore-keys — so an Electron upgrade can
+          # never restore prebuilds compiled for an older ABI.
+          path: |
+            node_modules/node-pty/build
+            node_modules/bun-pty/build
+          key: native-${{ runner.os }}-${{ hashFiles('packages/electron/package.json') }}
 
       - name: Build & prepare (parallel)
         working-directory: packages/electron
         shell: bash
         run: |
-          bun run build:web-assets &
-          bun run prepare:opencode-cli && bun run verify:opencode-cli &
-          bun run prepare:ripgrep &
-          bun run bundle:main &
-          wait
-          echo "✓ All parallel tasks finished, rebuilding native modules..."
-          bun run rebuild:native
+          bun run build:web-assets & pid_web=$!
+          (bun run prepare:opencode-cli && bun run verify:opencode-cli) & pid_cli=$!
+          bun run prepare:ripgrep & pid_rg=$!
+          bun run bundle:main & pid_bundle=$!
+
+          wait $pid_web; s_web=$?
+          wait $pid_cli; s_cli=$?
+          wait $pid_rg; s_rg=$?
+          wait $pid_bundle; s_bundle=$?
+          echo "Parallel tasks: web=$s_web cli=$s_cli ripgrep=$s_rg bundle=$s_bundle"
+          [ $((s_web + s_cli + s_rg + s_bundle)) -eq 0 ] || exit 1
+
+      - name: Rebuild native modules (skip on prebuild cache hit)
+        if: steps.cache-native.outputs.cache-hit != 'true'
+        working-directory: packages/electron
+        shell: bash
+        run: bun run rebuild:native
 
       - name: Package portable build
         working-directory: packages/electron
