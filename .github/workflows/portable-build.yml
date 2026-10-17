@@ -16,6 +16,7 @@ jobs:
       ARCH: x64
       PLATFORM: win
       BUN_VERSION: "1.4.3"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -65,23 +66,30 @@ jobs:
 
       - name: Build web UI
         working-directory: packages/electron
-        run: bun run build:web-assets
         shell: bash
+        run: bun run build:web-assets
 
       - name: Prepare OpenCode CLI
         working-directory: packages/electron
-        run: bun run prepare:opencode-cli && bun run verify:opencode-cli
         shell: bash
+        run: |
+          bun run prepare:opencode-cli
+          bun run verify:opencode-cli
+
+      - name: Prepare ripgrep
+        working-directory: packages/electron
+        shell: bash
+        run: bun run prepare:ripgrep
 
       - name: Bundle main process
         working-directory: packages/electron
-        run: bun run bundle:main
         shell: bash
+        run: bun run bundle:main
 
       - name: Rebuild native modules
         working-directory: packages/electron
-        run: bun run rebuild:native
         shell: bash
+        run: bun run rebuild:native
 
       - name: Package portable build
         working-directory: packages/electron
@@ -102,16 +110,13 @@ jobs:
         run: |
           SRC="packages/electron/dist/${{ env.PLATFORM }}-unpacked"
           DST="packages/electron/dist/${{ env.APP_NAME }}"
-
           if [ ! -d "$SRC" ]; then
             echo "⚠ Expected build directory not found: $SRC"
             echo "Contents of packages/electron/dist:"
             ls -la packages/electron/dist || true
             exit 1
           fi
-
           rm -rf "$DST"
-
           for attempt in 1 2 3 4 5; do
             if mv "$SRC" "$DST" 2>/tmp/mv-error.log; then
               echo "✓ Build output renamed successfully (attempt $attempt)"
@@ -122,7 +127,6 @@ jobs:
             echo "Retrying in 5s (Windows file locks can take a moment to release)..."
             sleep 5
           done
-
           echo "✗ Failed to rename build output after 5 attempts"
           echo "Contents of packages/electron/dist:"
           ls -la packages/electron/dist || true
@@ -142,9 +146,9 @@ jobs:
         shell: bash
         run: |
           echo "Build Summary:"
-          echo "  Platform: ${{ env.PLATFORM }}"
-          echo "  Architecture: ${{ env.ARCH }}"
-          echo "  App Name: ${{ env.APP_NAME }}"
+          echo " Platform: ${{ env.PLATFORM }}"
+          echo " Architecture: ${{ env.ARCH }}"
+          echo " App Name: ${{ env.APP_NAME }}"
           ls -lh "packages/electron/dist/${{ env.APP_NAME }}" || echo "⚠ Build directory not found"
 
       - name: Upload artifact
