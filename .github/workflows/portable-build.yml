@@ -6,10 +6,15 @@ on:
 permissions:
   contents: read
 
+# Cancel a running run when you re-trigger, so builds don't stack up
+concurrency:
+  group: portable-build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-windows-portable:
     name: Build Windows Portable x64
-    runs-on: windows-2022
+    runs-on: windows-2025            # was windows-2022 (deprecated image)
     timeout-minutes: 60
     env:
       APP_NAME: OpenChamber
@@ -21,20 +26,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Cache Bun
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.bun
-            ~/.cache/bun
-          key: bun-${{ runner.os }}-v${{ env.BUN_VERSION }}
-          restore-keys: |
-            bun-${{ runner.os }}-v
-
       - name: Setup Bun (pin 1.4.3)
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Cache Bun install store
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ env.BUN_VERSION }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-${{ env.BUN_VERSION }}-
 
       - name: Verify Bun version
         shell: bash
@@ -42,23 +45,15 @@ jobs:
           echo "bun --version:"
           bun --version
 
-      - name: Cache npm (used by Bun for some registries)
-        uses: actions/cache@v6
-        with:
-          path: ~/.npm
-          key: npm-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            npm-${{ runner.os }}-
-
-      - name: Cache pip
-        uses: actions/cache@v6
+      - name: Cache Electron + electron-builder binaries
+        uses: actions/cache@v4
         with:
           path: |
-            ~/.cache/pip
-            ~/.cache/pip/wheels
-          key: python-pip-${{ runner.os }}-${{ hashFiles('**/requirements.txt') }}
+            ~\AppData\Local\electron
+            ~\.cache\electron-builder
+          key: electron-${{ runner.os }}-${{ hashFiles('packages/electron/package.json') }}
           restore-keys: |
-            python-pip-${{ runner.os }}-
+            electron-${{ runner.os }}-
 
       - name: Install dependencies
         shell: bash
@@ -156,7 +151,7 @@ jobs:
         with:
           name: ${{ env.APP_NAME }}-portable-${{ env.PLATFORM }}-${{ env.ARCH }}
           path: packages/electron/dist/${{ env.APP_NAME }}
-          retention-days: 3
+          retention-days: 3        # keep 3 days, not the default 90 — saves storage
           if-no-files-found: error
 
       - name: Clean up temporary build files
