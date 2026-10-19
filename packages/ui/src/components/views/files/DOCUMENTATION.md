@@ -106,6 +106,8 @@ indented 12px per level, one faint guide per ancestor level under its
 chevron, a chevron instead of a folder icon, and the git state as a coloured
 letter on the right. A blue dot before the letter marks a file open in a tab;
 it no longer hides the file's git state. Change the look there, not per tree.
+The JSON tree viewer (`components/ui/JsonTreeViewer.tsx`) takes the same
+indent and guides and copies the chevron's look; keep the copy in step.
 
 ## Refreshing after file changes
 
@@ -151,7 +153,10 @@ folders.
 through −/+ steps, Ctrl/⌘ + wheel or trackpad pinch, Safari gesture events,
 a two-finger touch pinch, and double-click between fit and 1:1, anchored at
 the pointer; a zoomed image larger than the viewer pans by mouse drag;
-`imageZoom.ts` holds the scale math), `MediaArtifact` (native audio/video
+`imageZoom.ts` holds the scale math; round arrows fixed to the viewer's
+edges, and the arrow keys while the viewer has focus and the image is at fit,
+show the previous and next image of the same folder, see below),
+`MediaArtifact` (native audio/video
 element, duration and dimensions once metadata loads, a stated failure when
 the runtime cannot decode the codec), `FontArtifact` (a specimen under a
 throwaway `FontFace` family removed when the tab closes), `TableArtifact`
@@ -162,6 +167,20 @@ the fullscreen viewer use. SVG, Mermaid (`.mmd`) and delimited files are text
 with an artifact view: each has a per-path preview/source toggle, and opens
 in preview regardless of the text-first setting because an agent-produced
 artifact is opened to be looked at.
+
+Stepping through a folder's images: `FilesView` reads the shown image's folder
+with the tree's hidden and gitignored settings for every image shown, so
+files added or removed meanwhile count, and keeps the last listing's arrows
+on screen while it reads; an image the listing leaves out gets no arrows.
+`imageNeighbors.ts` picks the images before and after it in the tree's order,
+wrapping at the ends. SVG counts, since it opens in the image preview. A step
+opens the neighbour the way a single click in the tree does (`openContextFile`
+with `preview`): on desktop one preview tab follows the steps while the tab
+the user started from stays; on the phone the Files surface shows the
+neighbour in place and Back still leads to the folder being browsed. The
+viewer unmounts while the next image loads, so a step remembers its target and
+the viewer showing it within five seconds takes the focus back for the next
+key. A folder that cannot be read shows no arrows.
 
 Non-text artifacts the browser must own (PDF, audio, video, fonts) are loaded
 through `getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', …)` with
@@ -305,7 +324,9 @@ A move and both rename dialogs (the sidebar tree and `FilesView`'s own tree)
 go through `moveWorkspacePath`. It renames through the runtime and then
 points the context panel file tabs and `useFilesViewTabsStore` (open, selected
 and expanded paths) at the new path with `moveContextFilePaths`. A file tab's
-id comes from its path, so the tab is rebuilt in place and stays active.
+id comes from its path, so the tab is rebuilt in place and stays active. The
+two are kept under different folders in a draft waiting for a new space: the
+tabs under the draft's folder, the tree's paths under the space it shows.
 
 The open editor keeps unsaved edits through a move (`lib/filePathMoves.ts`).
 While the rename request is in flight, `FilesView` refuses saves of paths
