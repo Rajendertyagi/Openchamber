@@ -72,6 +72,13 @@ describe('buildHtmlRenderDocument', () => {
         expect(document).toContain('--oc-quote-mark');
     });
 
+    test('lets the host run the annotation overlay in the page, answering only the parent', () => {
+        const document = buildHtmlRenderDocument('<p>a</p>', theme);
+        expect(document).toContain('"openchamber-preview-bridge"');
+        expect(document).toContain('e.source!==window.parent');
+        expect(document).toContain('(0,eval)(d.code)');
+    });
+
     test('writes only well-formed variables and strips characters that would close the rule', () => {
         const document = buildHtmlRenderDocument('<p>a</p>', theme);
         expect(document).toContain(':root{color-scheme:dark;--background:#111;--foreground:#eee;--evil:red/stylescript;}');
@@ -85,6 +92,14 @@ describe('answer state', () => {
         for (const rule of ['.oc-options{', '.oc-option{', '.oc-option[aria-pressed=true]{', '.oc-button{']) {
             // Once in the theme style, once in the copy the bootstrap rewrites it with.
             expect(document.split(rule).length - 1).toBe(2);
+        }
+    });
+
+    test('gives every page the ready kit classes the tool description names, kept across a theme switch', () => {
+        const document = buildHtmlRenderDocument('<p>a</p>', theme);
+        for (const rule of ['.oc-box{', '.oc-muted{', '.oc-table{', '.oc-num{', '.oc-badge{', '.oc-badge[data-tone=error]{', '.oc-dot{', '.oc-bar{', '.oc-field{', '.oc-input{', '.oc-switch{', '.oc-segmented{', '.oc-button[data-variant=outline]{', '.oc-button[data-variant=destructive]{']) {
+            // A rule of its own, not the tail of a longer selector.
+            expect(document.split(`}${rule}`).length - 1).toBe(2);
         }
     });
 
@@ -233,6 +248,18 @@ describe('htmlRenderTheme', () => {
             expect(series).toEqual(dark
                 ? ['#60a5fa', '#2dd4bf', '#a78bfa', '#f472b6', '#a3e635']
                 : ['#2563eb', '#0d9488', '#7c3aed', '#db2777', '#65a30d']);
+        }
+    });
+
+    test('defines every variable the kit classes read, in both modes', () => {
+        const fonts = { rem: 16, text: 14, sans: 'sans-serif', mono: 'monospace' };
+        const document = buildHtmlRenderDocument('<p>a</p>', theme);
+        const read = new Set(Array.from(document.matchAll(/var\((--oc-[a-z-]+)/g), (match) => match[1]));
+        // Set by the class itself or by the page.
+        for (const local of ['--oc-tone', '--oc-tone-text']) read.delete(local);
+        for (const dark of [true, false]) {
+            const { variables } = htmlRenderTheme(getDefaultTheme(dark), fonts);
+            expect([...read].filter((name) => !(name in variables))).toEqual([]);
         }
     });
 

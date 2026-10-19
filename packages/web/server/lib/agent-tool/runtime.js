@@ -207,7 +207,7 @@ const OPENCODE_TEMP_DIRECTORY = path.join(os.tmpdir(), 'opencode');
 const RENDER_PAGE_HTML_DESCRIPTION = [
   `One self-contained HTML document, at most ${RENDER_PAGE_MAX_HTML_LENGTH} characters, with inline <style> and <script>. Remote scripts and stylesheets do not load in every client, so draw charts with inline SVG or your own script.`,
   "Layout: fluid width, as wide as the reply column (about 720px on desktop, 360px on phones), no horizontal padding on the outermost element, nothing wider; stack or wrap, and give a wide table its own overflow-x:auto box. The frame takes the page's height, so keep it short, give charts fixed pixel heights, and never use 100vh or height:100% on html or body.",
-  "A box: background color-mix(in srgb, var(--foreground) 4%, transparent), 6% for a box inside it, at least 16px padding, var(--radius) corners. A line only where it means something, such as a divider between sections.",
+  "Ready classes in the app's look, so these need no CSS of your own: .oc-box (a box; a box inside it steps up a tone), .oc-muted (secondary text), .oc-table on a div around a <table> (scrolls sideways when wide), .oc-num (tabular figures, end-aligned), .oc-badge with optional data-tone=\"success|warning|error|info\", .oc-dot (a legend dot) and .oc-bar (a horizontal bar) colored by --color (default --chart-1), the bar as long as --value (a percentage), .oc-field (a <label> around its text and control), .oc-input on an input, select or textarea, .oc-switch on a checkbox, .oc-segmented around <button>s (aria-pressed=\"true\" on the chosen one; also tabs). A line only where it means something, such as a divider between sections.",
   "Theme variables on :root, updated live on a theme switch: --background, --foreground, --muted, --muted-foreground, --card, --card-foreground, --border, --primary, --primary-foreground, --destructive, --warning, --success, --info, --code-background, --code-foreground, --chart-1 to --chart-6 (series), --radius, --font-sans, --font-mono. A base stylesheet already sets text color, font and size; the root font size is the chat's text size and follows the user's interface size, so size text in rem or em, not px. A page with its own colors, such as a mockup of the user's project, sets a color on all its text and gives itself a background: text without a color takes the theme's, and without a background the page shows the chat's.",
   "Scripts may add tooltips, tabs, toggles, sorting. On a phone a tap shows a hover tooltip, so keep tooltips and popups inside the page and flip them near an edge.",
   `Images: https, data:, or a local PNG, JPEG, GIF or WebP named by absolute path in src, CSS url() or a quoted script string, at most 10 MB each and 12 per page. Save a screenshot for a page in ${OPENCODE_TEMP_DIRECTORY}.`,
@@ -215,15 +215,15 @@ const RENDER_PAGE_HTML_DESCRIPTION = [
 ].join(' ');
 
 const RENDER_PAGE_AWAIT_DESCRIPTION = [
-  "Wait for the user to choose on the page. Give it one button whose click calls openchamber.submit(data, summary): data is the JSON your next step needs, summary the choice in a few words of the user's language, shown under the page. submit works only from a click on a waiting page and returns a promise; disable the button once it resolves.",
+  "Wait for the user to choose, fill in fields, or both, on the page. Give it one button whose click calls openchamber.submit(data, summary): data is the JSON your next step needs, summary the choice in a few words of the user's language, shown under the page. submit works only from a click on a waiting page and returns a promise; disable the button once it resolves.",
   "The call returns summary and data, or answered: false when the user wrote in the chat instead; their message follows.",
-  "Reloaded, the page gets openchamber.answer set to its data, to show the choice. Base classes: .oc-options (a grid), .oc-option on a <button> (aria-pressed=\"true\" when chosen), .oc-button (the send button).",
+  "Reloaded, the page gets openchamber.answer set to its data, to show the choice. Base classes: .oc-options (a grid), .oc-option on a <button> (aria-pressed=\"true\" when chosen), .oc-button (the send button; data-variant=\"outline\" for a secondary action, \"destructive\" for a dangerous one).",
 ].join(' ');
 
 // Its own names: `title` here names the page.
 const RENDER_PARAMETER_PROPERTIES = {
   html: { type: 'string', description: RENDER_PAGE_HTML_DESCRIPTION },
-  title: { type: 'string', description: `At most ${RENDER_PAGE_MAX_TITLE_LENGTH} characters` },
+  title: { type: 'string', description: `At most ${RENDER_PAGE_MAX_TITLE_LENGTH} characters; without it the page's <title> or first heading names it` },
   awaitAnswer: { type: 'boolean', description: RENDER_PAGE_AWAIT_DESCRIPTION },
 };
 
@@ -382,6 +382,40 @@ const booleanNormalizationBlock = (parameters) => {
 `;
 };
 
+const multiActionSchema = (definitions) => ({
+  property: { type: 'string', oneOf: definitions.map((entry) => ({ const: entry.action, description: entry.description })), description: 'OpenChamber action to perform' },
+  required: ['action'],
+  normalize: '',
+});
+
+/**
+ * A tool with one action (render, notify) has nothing to choose, so its action
+ * is optional, any string passes the schema, and the call always runs that one
+ * action. A weaker model put the whole call into the action as a JSON string
+ * (`{"action": "render.page", "title": "…"}` with the html beside it), which a
+ * strict schema refused before the tool ran, and every retry sent the whole
+ * page again. Fields revived from such a string fill only what the call did
+ * not carry already.
+ */
+const singleActionSchema = (definition) => ({
+  property: { type: 'string', description: `${definition.action}: ${definition.description}` },
+  required: [],
+  normalize: String.raw`        if (typeof args.action === "string" && args.action.trim().startsWith("{")) {
+          try {
+            const revived = JSON.parse(args.action)
+            if (revived !== null && typeof revived === "object" && !Array.isArray(revived)) {
+              const { action: _revivedAction, parameters: revivedParameters, ...revivedFields } = revived
+              const nested = revivedParameters !== null && typeof revivedParameters === "object" && !Array.isArray(revivedParameters) ? revivedParameters : {}
+              for (const [field, value] of Object.entries({ ...revivedFields, ...nested })) {
+                if (!Object.hasOwn(args, field)) args[field] = value
+              }
+            }
+          } catch {}
+        }
+        args.action = ${JSON.stringify(definition.action)}
+`,
+});
+
 /**
  * One template, one entry per enabled capability.
  *
@@ -402,6 +436,7 @@ const booleanNormalizationBlock = (parameters) => {
  */
 const createToolEntry = ({ name, description, definitions, parameters, codeMode, answers = false }) => {
   const normalizeBooleans = booleanNormalizationBlock(parameters);
+  const actionSchema = definitions.length === 1 ? singleActionSchema(definitions[0]) : multiActionSchema(definitions);
   return String.raw`    tools.add({
       name: ${JSON.stringify(name)},
       description: ${JSON.stringify(description)},
@@ -413,10 +448,10 @@ const createToolEntry = ({ name, description, definitions, parameters, codeMode,
       input: {
         type: "object",
         properties: {
-          action: { type: "string", oneOf: ${JSON.stringify(definitions.map((entry) => ({ const: entry.action, description: entry.description })))}, description: "OpenChamber action to perform" },
+          action: ${JSON.stringify(actionSchema.property)},
           parameters: { type: "object", properties: ${JSON.stringify(parameters)}, additionalProperties: false, description: "Inputs for the action; use an empty object when none are needed" },
         },
-        required: ["action"],
+        required: ${JSON.stringify(actionSchema.required)},
         // Models routinely put the inputs next to the action; the schema has to
         // let that reach execute() instead of rejecting the call.
         additionalProperties: true,
@@ -439,7 +474,7 @@ const createToolEntry = ({ name, description, definitions, parameters, codeMode,
             if (revived !== null && typeof revived === 'object' && !Array.isArray(revived)) args.link = revived
           } catch {}
         }
-${normalizeBooleans}        const actionTitles = ${JSON.stringify(AGENT_TOOL_ACTION_TITLES)}
+${actionSchema.normalize}${normalizeBooleans}        const actionTitles = ${JSON.stringify(AGENT_TOOL_ACTION_TITLES)}
         const title = Object.hasOwn(actionTitles, args.action) ? actionTitles[args.action] : args.action
         const progress = (extra) => context.progress({
           ${name}: {
