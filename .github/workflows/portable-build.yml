@@ -20,7 +20,7 @@ jobs:
       APP_NAME: OpenChamber
       ARCH: x64
       PLATFORM: win
-      BUN_VERSION: "1.4.3"
+      BUN_VERSION: "1.4.4"
       # Pin electron/electron-builder download caches to workspace paths
       # (electron-builder docs: env var must be absolute; workspace-relative
       # makes actions/cache save/restore deterministic).
@@ -31,7 +31,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Setup Bun (pin 1.4.3)
+      - name: Setup Bun (pin 1.4.4)
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
