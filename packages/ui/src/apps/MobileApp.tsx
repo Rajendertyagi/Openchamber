@@ -1,3 +1,4 @@
+import { flushSync } from 'react-dom';
 import { OpenCodeCompatibilityGate } from '@/components/update/OpenCodeCompatibilityGate';
 import React from 'react';
 
@@ -53,7 +54,7 @@ import { subscribeActiveRelayTunnelStatus } from '@/lib/relay/runtime-tunnel';
 import { isRelayLimitReached } from '@/lib/relay/tunnel-client';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useAuthoritativeSessionCleanup } from '@/components/session/sidebar/list/useAuthoritativeSessionCleanup';
-import { restoreLastActiveSession } from '@/sync/last-session-restore';
+import { beginLastSessionRestore } from '@/sync/last-session-restore';
 import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -61,6 +62,7 @@ import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import { useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
 import { refreshTrackers } from '@/stores/useTrackerAuthStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useChatWidthAttribute } from '@/hooks/useChatWidthAttribute';
 import { closeTopmostBackLayer } from '@/lib/mobileBackLayers';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -100,6 +102,7 @@ import { useDeepLinkHandlers, useDeepLinkSource } from './deepLinkNavigation';
 import { useEdgeSwipe } from './useEdgeSwipe';
 import { useMobileChatInsets } from '@/lib/mobileChatInsets';
 import { useNativePushRegistration } from './useNativePushRegistration';
+import { useNativeWidgetSync } from './useNativeWidgetSync';
 import { IpadSidebarResizeHandle } from './IpadSidebarResizeHandle';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
@@ -109,6 +112,9 @@ import {
   useIpadPanelSlide,
   useIpadSidebarResize,
 } from './ipadSidebarResize';
+import { ReceivedPagePanel } from '@/components/chat/sharePages/received/ReceivedPagePanel';
+import { focusChatInput } from '@/components/chat/composer/editor/dom';
+import { hasReceivedPages, useReceivedPagesStore } from '@/components/chat/sharePages/received/receivedPagesStore';
 
 const MOBILE_SETTINGS_PAGES = [
   'general',
@@ -185,12 +191,15 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     const { mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs } = useUIStore.getState();
     const extensions = phoneGuestPanelModes(useGuestsStore.getState().guests);
     const shown = shownMobileWorkspaceTabs(mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs, extensions);
-    setWorkspaceTab((current) => (shown.includes(current) ? current : shown[0]));
+    const pagesShown = hasReceivedPages(useReceivedPagesStore.getState());
+    setWorkspaceTab((current) => (shown.some((id) => id === current) || (current === 'pages' && pagesShown) ? current : shown[0]));
     setWorkspaceOpen(true);
   }, []);
   // A plan opened from the workspace drawer's Notes tab, shown as a fullscreen
   // layer on top of it (back returns to the notes).
   const [openPlan, setOpenPlan] = React.useState<{ id: string; title: string; projectRef: ProjectRef } | null>(null);
+  const [openReceivedPage, setOpenReceivedPage] = React.useState<{ receivedId: string; title: string } | null>(null);
+
   const [settingsInitialMobileStage, setSettingsInitialMobileStage] = React.useState<'nav' | 'page-content'>('nav');
   // What Changes is asked to open: a per-file diff, or the commit an extension
   // named (`host.openCommit`). One request at a time, so a later file tap
@@ -221,7 +230,6 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   }, [guestPage, openGuestPageId]);
   const closeGuestPage = React.useCallback(() => useUIStore.getState().setOpenGuestPage(null), []);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
-  const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
   const updateAvailable = useUpdateStore((state) => state.available);
   const updateRuntimeType = useUpdateStore((state) => state.runtimeType);
   const showCapacitorOnlyFeatures = React.useMemo(() => isCapacitorMobileApp(), []);
@@ -447,17 +455,10 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     return () => useMobileChatInsets.setState({ left: 0, right: 0 });
   }, [sidebarWidth, workspacePanelWidth]);
 
-  // Wide chat layout: the shared chat columns key off this root class, but only
-  // the desktop App set it — so on a tablet, where the chat column is finally
-  // wide enough for the setting to mean something, it did nothing. Applied for
-  // every mobile surface; on a phone the viewport is narrower than even the
-  // normal clamp, so it is a no-op there.
-  React.useEffect(() => {
-    if (typeof document === 'undefined') return;
-    const root = document.documentElement;
-    root.classList.toggle('wide-chat-layout', wideChatLayoutEnabled);
-    return () => root.classList.remove('wide-chat-layout');
-  }, [wideChatLayoutEnabled]);
+  // Chat width: applied for every mobile surface, because on a tablet the chat
+  // is wide enough for it to matter; on a phone the viewport is narrower than
+  // even the default column, so it changes nothing there.
+  useChatWidthAttribute();
 
   // The draft screen keeps its starter chips while the keyboard is up when
   // there is room for both: a tablet in portrait, or any tablet orientation
@@ -479,6 +480,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       openFiles: () => openFilesSurface(),
       openSourceBoard: () => openSurface('board'),
       openPlan: setOpenPlan,
+      openReceivedPage: setOpenReceivedPage,
     }),
     [openChangesSurface, openFilesSurface, openSurface],
   );
@@ -548,6 +550,10 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     if (closeTopmostBackLayer()) {
       return true;
     }
+    if (openReceivedPage) {
+      setOpenReceivedPage(null);
+      return true;
+    }
     if (openPlan) {
       setOpenPlan(null);
       return true;
@@ -572,13 +578,13 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       return true;
     }
     return false;
-  }, [activeSurface, closeGuestPage, closeSurface, closeWorkspace, guestPage, openPlan, sessionsSheetOpen, workspaceOpen]);
+  }, [activeSurface, closeGuestPage, closeSurface, closeWorkspace, guestPage, openPlan, openReceivedPage, sessionsSheetOpen, workspaceOpen]);
 
   useNativeAndroidBackButton(handleNativeBack);
 
   // Mobile web has no back button event: the same ladder runs from the
   // browser's Back, off a history guard held while a layer is open.
-  useMobileWebBackButton(handleNativeBack, Boolean(openPlan || guestPage || activeSurface || workspaceOpen || sessionsSheetOpen));
+  useMobileWebBackButton(handleNativeBack, Boolean(openPlan || openReceivedPage || guestPage || activeSurface || workspaceOpen || sessionsSheetOpen));
 
   // The footer update item follows the shared update store, which in the
   // Capacitor shell tracks the app build (store updates), not the server. The
@@ -772,6 +778,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                 pendingChangesDiff={pendingChangesDiff}
                 pendingChangesCommit={pendingChangesCommit}
                 onOpenPlan={setOpenPlan}
+                onOpenReceivedPage={setOpenReceivedPage}
                 variant={workspaceAsPanel ? 'panel' : 'drawer'}
               />
             </ErrorBoundary>
@@ -802,6 +809,34 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                 onNavigatedToChat={() => {
                   closeSurface();
                   closeWorkspace();
+                }}
+              />
+            </ErrorBoundary>
+          </MobileFullscreenSurface>
+        ) : null}
+
+        {openReceivedPage ? (
+          <MobileFullscreenSurface
+            open
+            variant={surfaceVariant}
+            onClose={() => setOpenReceivedPage(null)}
+            ariaLabel={openReceivedPage.title}
+            title={openReceivedPage.title}
+          >
+            <ErrorBoundary>
+              <ReceivedPagePanel
+                receivedId={openReceivedPage.receivedId}
+                onAddedToChat={() => {
+                  // Both layers close first, so the page's focus restore (to the drawer row that
+                  // opened it) runs before the composer takes focus. The phone's composer is a pill
+                  // that grows into the editor only inside a tap, as here: its own expand does it.
+                  flushSync(() => {
+                    setOpenReceivedPage(null);
+                    closeWorkspace();
+                  });
+                  const pill = document.querySelector<HTMLElement>('[data-composer-morph-prompt="true"]');
+                  if (pill) pill.click();
+                  else focusChatInput();
                 }}
               />
             </ErrorBoundary>
@@ -1351,9 +1386,11 @@ function MobileAppContent({ apis }: MobileAppProps) {
   }, [agentsCount, isConnected, loadAgents, loadProviders, providersCount]);
 
   // Cold-launch continuity: after the launch instance connects, reopen the
-  // session that was open on this instance last time — but only after an
-  // authoritative sessions snapshot confirms it still exists, and only if the
-  // user hasn't opened a session in the meantime. An open new-session draft
+  // session that was open on this instance last time, at once when its folder
+  // is known, and only if the user hasn't opened a session in the meantime.
+  // The authoritative sessions snapshot checks the choice afterwards: with
+  // thousands of sessions it is many pages, each a round trip through the
+  // relay, and waiting for all of them held the launch for seconds. An open new-session draft
   // does NOT block the restore: ChatContainer auto-opens the draft whenever no
   // session is active, so at this point it reflects the boot default, not a
   // user choice. Runs once per successful launch connect; in-app instance
@@ -1368,8 +1405,15 @@ function MobileAppContent({ apis }: MobileAppProps) {
     // Safety valve: the overlay must never strand the user on the splash if
     // the snapshot hangs — fall through to the draft after a bounded wait.
     const overlayTimeoutId = window.setTimeout(() => setLastSessionRestorePending(false), 6000);
+    const attempt = beginLastSessionRestore({ selectNow: true, refresh: true });
+    // A session on screen leaves no draft to cover.
+    const showSelectedSession = () => {
+      if (useSessionUIStore.getState().currentSessionId) setLastSessionRestorePending(false);
+    };
+    const stopWatchingSelection = useSessionUIStore.subscribe(showSelectedSession);
+    showSelectedSession();
     void (async () => {
-      const result = await restoreLastActiveSession({ refresh: true });
+      const result = await attempt();
       if (cancelled) return;
       // A failed list read keeps the ref unset so the next connect (a stale
       // persisted isConnected can fire this early) retries the restore.
@@ -1378,6 +1422,7 @@ function MobileAppContent({ apis }: MobileAppProps) {
     })();
     return () => {
       cancelled = true;
+      stopWatchingSelection();
       window.clearTimeout(overlayTimeoutId);
     };
   }, [connectionEpoch, isConnected, isNativeMobileApp]);
@@ -1450,6 +1495,7 @@ function MobileAppContent({ apis }: MobileAppProps) {
   // (document.hasFocus() is unreliable) and leaked while the app was open; the in-app SSE
   // notification dispatch is no-op'd for native in renderMobileApp.
   useNativePushRegistration({ enabled: isNativeMobileApp && isConnected });
+  useNativeWidgetSync({ enabled: isNativeMobileApp && isConnected && isInitialized });
   // Single native deep-link entry point: notification taps AND the openchamber:// URL
   // scheme (widgets, Live Activities, external links). Registered unconditionally so a
   // cold-launch tap/open isn't lost on the connect/splash screen; intents stash until

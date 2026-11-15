@@ -88,7 +88,8 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - The run's report arrives later as a synthetic message (`lib/workflows/report.ts`) and renders as one collapsed line in `TimelineNotice`, like a dispatched session's result, opening a turn of its own.
 
 - `HtmlRenderFrame.tsx` and `htmlRender.ts`
-  - A completed `openchamber_render` call that OpenChamber accepted (`renderedPage` in `@/lib/opencode/tools`: `metadata.openchamber.ok` and an `html` or `ui` input) is drawn as the page itself in place of its tool row. A `ui` input is a program in the UI block language, drawn by `UiPageFrame.tsx` with the block renderer; its Button answers a waiting call through the same `answerRenderedPage`, and a program this client cannot draw answers with the errors (`notDrawn`), so the agent can fix it instead of waiting on fields nobody sees. `PageAskStatus.tsx` is the status line both kinds share. While a page waits, it has a Decline that ends the wait without an answer (`declined`); the agent hears that the user declined, and the line reads "Declined". On a `ui` form `DeclinePageButton.tsx` sits beside the Send the form adds, or alone in that row when the agent gave its own buttons. An html page gets it from its answer script, beside the page's last `.oc-button` (the class the tool description gives agents for their send button), so it sits with the page's own actions however long the page is; the page reports whether it found one, and only a page without one gets `DeclinePageButton` under it (and under its full-screen view). While an answer or a decline is on its way the other one is disabled, so the losing click never reaches the server as a stale answer. A refused call keeps its ordinary row, and so does a running one, except a page that waits for the user's answer (`awaitAnswer`): its call runs until the user answers, so it is drawn while it runs, and it stays with a "Not answered" line when the call ends in an error (the user stopped the turn). A stored running call is not proof that the page still waits (`usePageAsk.ts`, *Why a stored running call is not enough for a page to wait*).
+  - A completed `openchamber_render` call that OpenChamber accepted (`renderedPage` in `@/lib/opencode/tools`: `metadata.openchamber.ok` and an `html` or `ui` input) is drawn as the page itself in place of its tool row. A `ui` input is a program in the UI block language, drawn by `UiPageFrame.tsx` with the block renderer; its Button answers a waiting call through the same `answerRenderedPage`, and a program this client cannot draw answers with the errors (`notDrawn`), so the agent can fix it instead of waiting on fields nobody sees. `PageAskStatus.tsx` is the status line both kinds share. A page shown with `answerLater` (`ask.kind: 'later'`) completed its call when it appeared, so `usePageAsk` reads where it stands from the server's later pages (`@/sync/later-pages`, fed by `openchamber:render-later.updated`): an open one takes an answer like a waiting page, through the same `answerRenderedPage`, and the answer, a decline or a `notDrawn` report shows on every client afterwards, with "not delivered to the agent yet" while the server's delivery fails (`undelivered`), in its own element beside the summary, so a long summary cut to the line's width never hides it. A page the server does not keep shows without asking. Nothing waits on a later page, so it is never brought into view and carries no `data-waiting-page` (`pageBlocksTurn`): a toast's "Open session" finds the page the turn waits on, not an older later page. A later `ui` page shows again on every load, maybe before the extension catalog: it reports `notDrawn` only once the catalog is in (`useGuestsStore` status `ready`), so a valid page naming an extension component is not closed for every client. Known limits: the server inside an isolated space refuses `answerLater`, and the VS Code extension shows later pages without answer controls (`packages/web/server/lib/openchamber-control/DOCUMENTATION.md`). While a page waits, it has a Decline that ends the wait without an answer (`declined`); the agent hears that the user declined, and the line reads "Declined". On a `ui` form `DeclinePageButton.tsx` sits beside the Send the form adds, or alone in that row when the agent gave its own buttons. An html page gets it from its answer script, beside the page's last `.oc-button` (the class the tool description gives agents for their send button), so it sits with the page's own actions however long the page is; the page reports whether it found one, and only a page without one gets `DeclinePageButton` under it (and under its full-screen view). While an answer or a decline is on its way the other one is disabled, so the losing click never reaches the server as a stale answer. A refused call keeps its ordinary row, and so does a running one, except a page that waits for the user's answer (`awaitAnswer`): its call runs until the user answers, so it is drawn while it runs, and it stays with a "Not answered" line when the call ends in an error (the user stopped the turn). A stored running call is not proof that the page still waits (`usePageAsk.ts`, *Why a stored running call is not enough for a page to wait*).
+  - A call that shares its page with other people (`share` in the input) is drawn as its card instead of the page, once the server accepted it: what the page asks and one row per recipient with the link's state (`../../sharePages/DOCUMENTATION.md`). A refused or running share call keeps its ordinary row.
   - The page loads through `srcdoc` in a frame sandboxed with `allow-scripts allow-forms` and never `allow-same-origin`, so its script runs in an opaque origin with no reach into the app. `buildHtmlRenderDocument` puts a bootstrap first in the page's head: the theme as CSS variables (`htmlRenderTheme`; the agent tool's description in `packages/web/server/lib/agent-tool/runtime.js` lists the same names; `--chart-1` is the theme's accent and `--chart-2` to `--chart-6` a fixed set per light and dark, `CHART_SERIES` in `../../lib/visualKit.ts`, because the theme's syntax colors made near-identical series; boxes, badges, dots and bars also come from that module, shared with UI blocks), a size report, and http(s) link clicks handed to the host, which opens them with `openExternalUrl`. A theme switch is posted to the page instead of rebuilding it, so the page keeps its script state. Messages are accepted only from the frame's own window. A focused frame keeps every key from the app, so the bootstrap passes on a Cmd/Ctrl chord the page left alone (not typed into its own fields, not handled by its script, not the clipboard, select-all or undo chords), and the host replays it as a keydown and keyup on the frame element. The app's shortcut handling then runs as for any key pressed outside a text field, with no list of shortcuts to keep in sync. A chord without Cmd or Ctrl is never replayed. A wheel up or vertical swipe over the page scrolls the chat around the frame while its events stay in the frame, so the bootstrap reports each one its script and its own scrolling boxes left alone (a direction only), and the host raises it on the frame element for the chat's follow (`lib/scroll/DOCUMENTATION.md`); without it a streaming reply kept pulling a reader who scrolled over a page back to the end. Pages are interactive within themselves (tooltips, tabs, sorting).
   - A page that waits for an answer sends it with `openchamber.submit(data, summary)`, which the bootstrap posts as an MCP Apps `ui/message` request (the summary as text content, the data in `_meta["openchamber/data"]`); the host replies with a JSON-RPC result or error that settles the page's promise. The host accepts it only while the page waits and only during a user gesture: a click inside the frame activates the chat window too (`navigator.userActivation`, checked in Chromium and WebKit), and a page that sends on its own does not, even if it skips the bootstrap. The answer goes to the server through `answerRenderedPage` (`@/lib/renderPageAnswer`); a refusal (answered on another device, turn ended) shows a toast and rejects the page's promise. The page learns where it stands from `openchamber.answer`, set when it loads (a JSON script element, so no data can close it) and updated by a posted state message, so a page loaded again after the answer can show the choice. A line under the page says it waits, what was answered, that the user answered in the chat, or that they wrote in the chat before the page appeared (the call returned at once; `render-page.js` in `packages/web/server/lib/openchamber-control/`). The base stylesheet carries ready classes for such a page in the app's look (`.oc-options`, `.oc-option` with `aria-pressed="true"` on the chosen one, `.oc-button`), which the tool description names, so agents do not style their own on every page. `.oc-option` is the app's flat tile (`.oc-tile`: no border, a tone step on the page, a further step on hover or focus) and takes the selection fill once chosen (`--oc-selection`, like a pressed chip), since the accent colour means act, never chosen. Focus draws no ring on either class; a focused one takes its hover fill. `.oc-button` is drawn like the app's main `Button` (pale accent fill and border, readable accent text from `getReadableThemeColors`, the `.oc-raised-button` light), through `--oc-button-*` variables `htmlRenderTheme` computes per light and dark. It is sized in the app's rem (`--oc-rem`, read from the root font size, which the interface size setting scales), so it matches the app's buttons at any interface size; `--radius` follows the same scale.
   - Every page also gets a small kit of ready classes for what agents drew again and again (`KIT_CSS`): `.oc-box`, `.oc-muted`, `.oc-table` (a div around a table: the chat's Markdown table frame, scrolling sideways when wide), `.oc-num`, `.oc-badge` with `data-tone`, `.oc-dot` and `.oc-bar` (colored by `--color`, the bar as long as `--value`), two more `Button` variants on `.oc-button` (`data-variant="outline"` for a secondary action, `"destructive"`, through the same `--oc-button-*` variables and `--oc-destructive-*`), and form controls drawn like the app's: `.oc-field`, `.oc-input` (the `Input` with its field light), `.oc-switch` (the `Switch` on a checkbox), `.oc-segmented` (the active-pill strip). In 45 pages agents drew before the kit, about a third of the characters were the page's own CSS for these, written anew each time and looking different on every model. The light and dark differences come from `--oc-edge`, `--oc-field-*`, `--oc-raised-*`, `--oc-recessed`, `--oc-hover` and `--oc-*-text`, which `htmlRenderTheme` computes from the app's `.oc-raised`, `.oc-field` and `.oc-recessed` rules; the tool description names the classes and not these variables. A page with its own look ignores the kit. HTML stays for mockups and custom drawings, which no component catalog covers; data, comparisons and questions go to UI blocks (`../../uiBlocks/DOCUMENTATION.md`), because a weaker model's HTML looked different and often broken on every page, while a block draws with the app's own components whatever model wrote it. The block guidance costs about 700 tokens, generated from the catalog, where a full generative UI library's reference ran ten times the size of this tool's description.
@@ -245,7 +246,7 @@ use native `data-streamdown` markers.
 #### Why Markdown consumers use the lazy wrapper
 
 `markdownRendererLoader.ts` dynamically imports the renderer and its imports,
-including Streamdown, KaTeX, Shiki and beautiful-mermaid with ELK.
+including Streamdown, KaTeX and beautiful-mermaid with ELK.
 The web and mobile entry points start that import at boot without making the
 first render wait for it.
 Components take `MarkdownRenderer`, `SimpleMarkdownRenderer` or
@@ -362,61 +363,48 @@ rendering keeps its direct-child rules. This CSS alternative still needs its
 own browser performance comparison; the explicit-metadata experiment does not
 establish its invalidation cost.
 
-Markdown code in languages with a `@pierre/highlights` lexer (about 170, every
-common one) is tokenized on the main thread, synchronously, in one pass over
-the whole block with `MARKDOWN_HIGHLIGHTS_THEME`, so the block paints
-highlighted on its first commit. The rest run in `streamdown-code.worker.ts`
-on Shiki/Oniguruma with the same grammar sanitization as the shared code
-worker and `MARKDOWN_SHIKI_THEME`. Until the Highlights import settles, the
-first blocks wait for it and then take the same split. Both themes resolve to the same `--md-*` variables.
-ANSI is the exception: Highlights has a lexer for it, but its tokens drop the
-escape sequences and merge the text around them, so token text no longer
-matches the source. Everything here places tokens by source offset (the packed
-transfer ranges, CodeMirror decorations), so `isHighlightsLanguage` in
-`highlightsEngine.ts` keeps ANSI on Shiki.
-For Shiki languages, complete-line grammar state stays in eight bounded worker
-lineages; edits restart from a matching prefix or a full pass. The client preserves the pre-migration cache
-policy: four recent streaming results, four complete-line snapshots, and a
-2000-entry, 24 MiB estimated completed-result LRU. Language and the existing
-dual-hash content fingerprint key pure highlighting. A single oversized entry
-is retained; no filesystem or runtime-dependent annotations enter this cache.
-Only completed requests coalesce. Streaming results promote to the completed
-cache when the same source settles. Snapshot sequence numbers keep an older
-response from replacing a newer base in the same lineage.
-Streaming requests reuse complete prefix rows and transfer only suffix token
-ranges and palette indexes in two ArrayBuffers. Text is reconstructed from the
-caller's source using UTF-16 offsets, without JSON encode/decode. Whitespace
-tokens may absorb foreground differences but preserve font/background and
-decoration boundaries. `MarkdownCode` owns the React token rows and line numbers,
-using Streamdown's public container and header. A warm lookup renders tokens on
-the first commit; unchanged row arrays skip row rendering. Async results carry
-their input and append lineage, so abandoned contexts and shorter late results
-cannot replace newer displays. Shiki never runs on the main thread:
-unsupported workers, oversized input and failed requests leave readable code.
-Main-thread Highlights results go through the same caches; streaming rows that
-match the previous result of the same block keep their identity. Each dispatched request has a five-second
-deadline. A timeout terminates the worker, caches only the offending failure in
-the same LRU, and replays other pending requests with fresh deadlines. A crash
-or message error ends all pending requests without caching their failure;
-subsequent requests may retry. Work serializes inside the worker, with no new
-main-thread queue admission limit. The existing `openchamber_stream_highlight`
-full-pass flag bypasses incremental reuse. Language-load failure falls back to
-text. Line budgets remain 1200 settled, 300 open-fence, and 200 in VS Code.
+Markdown code is tokenized by `@pierre/highlights` on the main thread,
+synchronously, in one pass over the whole block with
+`MARKDOWN_HIGHLIGHTS_THEME`, so the block paints highlighted on its first
+commit. Colors are the `--md-*` variables, so a theme switch repaints through
+CSS without tokenizing again. `highlightsLanguage` in `highlightsEngine.ts`
+picks the lexer for every consumer: the language's own, a close relative's from
+`LANGUAGE_RELATIVES` (`lib/shiki/languageRelatives.ts`, shared with files and
+diffs), or plain text. Until the Highlights import settles, the first blocks
+show plain text and wait for it. A runtime whose WebAssembly lacks SIMD fails
+the import, and code there stays plain text.
+A fence tagged `ansi` shows its text with the escape sequences removed and no
+colors (`stripAnsi`); the copy button and selection still give the fence's own
+source. Highlights has an ANSI lexer, but its tokens drop the escapes and merge
+the text around them, so they stop matching the source, and file-path marking
+and CodeMirror decorations place tokens by source offset.
+`MarkdownCodeHighlighter` keeps four recent streaming results and a 2000-entry,
+24 MiB estimated completed-result LRU. Language and the dual-hash content
+fingerprint key pure highlighting. A single oversized entry is retained; no
+filesystem or runtime-dependent annotations enter this cache. Streaming results
+promote to the completed cache when the same source settles. Streaming rows
+that match the previous result of the same block keep their identity, so React
+skips them. Whitespace tokens may absorb foreground differences but preserve
+font/background and decoration boundaries. `MarkdownCode` owns the React token
+rows and line numbers, using Streamdown's public container and header. Async
+results carry their input and append lineage, so abandoned contexts and shorter
+late results cannot replace newer displays. Line budgets remain 1200 settled,
+300 open-fence, and 200 in VS Code; a block over its budget renders as plain
+rows.
 Lexical file-path matches have a separate bounded source cache; confirmation
 stays directory/runtime-bound. Empty path results do not trigger another token
 callback, and annotations reuse results only within their resolver instance.
-VS Code loads the bundled worker through its existing webview blob-worker
-boundary. Image export awaits the same token path with a bounded fallback to
-readable source. The code body reads prepared tokens during render, so the final
-flush commits them without DOM readiness markers or an observer.
+Image export awaits the same token path with a bounded fallback to readable
+source. The code body reads prepared tokens during render, so the final flush
+commits them without DOM readiness markers or an observer.
 
 #### Why pending code retains its last result
 
 Like Streamdown's highlighted body, the code body uses plain text on first mount
-and retains the last display while an appended input waits for highlighting.
-It does not splice tokens itself: the worker owns complete-line grammar and token
-reuse. Replacing the entire block with plain rows between worker results discarded
-prefix identity and repeatedly deleted and recreated highlighted tokens.
+and retains the last display while an appended input waits for highlighting,
+which happens only until the Highlights import settles.
+Replacing the entire block with plain rows between results discarded prefix
+identity and repeatedly deleted and recreated highlighted tokens.
 
 A mounted body records the displayed result's actual input after commit. Results
 for intermediate append inputs may advance that display even when newer input is
@@ -424,44 +412,50 @@ pending, so continuous output does not starve updates. Shorter late results cann
 roll it back. Edits, deletions, language changes and plugin/context changes start
 a new lineage; callbacks from abandoned lineages are ignored even if the text
 later returns to an old prefix. Exact cached and policy-driven plain results take
-precedence. Worker failure publishes the requested plain text through the existing
-plugin fallback. This is one mounted component's display state, not a shared cache.
+precedence. Where Highlights cannot run, the plugin publishes the requested
+plain text. This is one mounted component's display state, not a shared cache.
 
-The separate code worker (`markdown-shiki.worker.ts`) remains shared by
-non-Markdown code views for Shiki languages. Their client renders Highlights
-languages on the main thread, and `getCachedHighlightedCode` /
-`getCachedHighlightedLines` answer them synchronously for a highlighted first
-paint.
-CodeMirror (`lib/codemirror/codeHighlight.ts`) runs Highlights' `LiveTokenizer`
-on the main thread, so an edit re-tokenizes only the lines it changed and
-colors land with the keystroke; it uses this worker only for languages without
-a Highlights lexer. Its whole-block HTML, per-line HTML and themed token APIs,
-cache and timeout/replay rules are unchanged. Markdown does not call that
-worker's HTML interfaces. Its `init` message warms Highlights only; Shiki and
-its WebAssembly start on the first language Highlights has no lexer for.
+Code views outside Markdown (`HighlightedCode`,
+`useHighlightedLines`) take whole-block and per-line HTML from
+`highlightedCode.ts`, which renders with Highlights on the main thread and
+memoizes by content fingerprint in a 2000-entry, 24 MiB LRU.
+`getHighlightedCode` / `getHighlightedLines` answer synchronously for a
+highlighted first paint; `highlightCode` / `highlightLines` wait for the import
+first. CodeMirror (`lib/codemirror/codeHighlight.ts`) runs Highlights'
+`LiveTokenizer` on the main thread, so an edit re-tokenizes only the lines it
+changed and colors land with the keystroke. Both follow the same language,
+ANSI and no-SIMD rules as Markdown code.
 
-#### Why Highlights languages run on the main thread without lineages
+#### Why Highlights runs on the main thread without lineages
 
 Highlights tokenizes without regular expressions, about a millisecond per
 100 KB, which is less than a worker round trip; the line budgets cap a block
 well below that. Running it on the main thread removes the plain first frame,
 and re-tokenizing a streamed fence from its first line costs less than keeping
-and matching lineage state. Its lexers are written per
-language and cannot backtrack, so the `template-call` hang behind the
-sanitization does not apply to them. A runtime whose WebAssembly lacks SIMD
-fails the Highlights import, and every language falls back to Shiki.
+and matching lineage state. Its lexers are written per language and cannot
+backtrack, so no request needs a deadline.
 
-#### Why the code plugin uses the application's WASM worker
+#### Why Highlights is the only highlighter and not Highlights with a Shiki fallback
 
-The official code plugin tokenizes both configured themes even when they are
-identical. This application uses one CSS-variable theme, so its worker runs one
-pass and, for Shiki languages, reuses the existing grammar sanitization and
-complete-line state rules. Transferring suffix ranges keeps repeated token strings and
-unchanged rows out of worker replies while preserving native Streamdown tokens.
-Cache eviction, request coalescing, timeout replay and grammar-lineage retention
-follow the pre-migration worker. The payload and its byte estimate change from
-HTML to tokens so React can own the code body; streaming-only prefixes stay in
-the bounded recent results.
+A Shiki/Oniguruma worker used to highlight what Highlights did not: languages
+without a lexer, `ansi` fences, and every language on a runtime without
+WebAssembly SIMD (Safari before 16.4). It was rejected for its cost against
+what it served. The fallback needed two workers, grammar-state resume for
+streamed fences, a five-second deadline with worker restart against grammar
+backtracking, grammar sanitization and a second theme format, and the language
+list alone put Shiki core and the 614 KB Oniguruma engine on the main thread at
+startup. Rare languages now take a relative's lexer or plain text, ANSI output
+is plain text, and a runtime without SIMD shows uncolored code. `@pierre/diffs`
+keeps its own `shiki-js` fallback for files and diffs.
+
+#### Why the code plugin is the application's and not `@streamdown/code`
+
+The official code plugin runs Shiki and tokenizes both configured themes even
+when they are identical. This application colors through one set of CSS
+variables, so its plugin runs one Highlights pass and returns native Streamdown
+tokens that React renders as rows. Streamdown reads only `getThemes` and
+`highlight` from it; its language questions belong to its own code block, which
+`MarkdownCode` replaces.
 
 ### Optional history disclosure
 
@@ -777,7 +771,7 @@ update, with the `shellID`, when the command starts.
 - A foreground shell row has the background row's Stop while its call runs with a `shellID` and `sync/background-shells.ts` lists the command (its directory and command text go into the stop). OpenCode 2.x cannot cancel a call the turn waits for, so `stopForegroundShell` (`foregroundShellStop.ts`) moves the session's blocking work to the background with `session.background`, waits for this call's own settle event (`waitForShellSettle`), and then stops the command with `stopBackgroundShells`, note included, so the row ends as the background row reading "stopped". The index's `background` flag gates neither the button nor the wait: a command first seen in a list reads as background while its call may still wait for it, and a removal before the call settled would make it fail as a foreground call with no completion. OpenCode does not store the progress metadata, so a call read back from history (after a page reload) has no `shellID`: that row offers no Stop, as it shows no live output. `session.background` moves everything the turn waits on, so a parallel shell call or subagent goes to the background too and keeps running there, stoppable from its own row. The stop runs outside React, because the row that started it unmounts when the call becomes a background row; a module-level set of commands being stopped keeps both rows, the composer's background commands strip and an extension's `shellStop` (refused with `HOST_REJECTED` in `PluginPane.tsx`) from sending a second stop. A command that ends before or right after it settles is not stopped. When `session.background` finds nothing blocking (the turn ended while the click was on its way) no settle comes, and after 10 s the stop fails with the usual toast; the same happens when the settle falls into a stream gap, and the command then runs on in the background with its row's own Stop.
 - A `subagent` call that went to the background (`background: true`, or moved there with `session.background`) settles at once with `metadata.status: "running"` and the child in `metadata.sessionID`. `SubagentToolPartContent` rebuilds it from the child (`backgroundSubagentPart.ts`): running while the child session is active in `global-session-status`, then finished, failed or stopped from the report OpenCode appends (`findSubagentRun`), with the `in background` header label while it runs, `stopped` after a cancel, and the stop action described for subagent rows above. `ChatContainer` drops that report from the timeline (`keepCommandSubagentReports`), so the subagent stays where it was started instead of reappearing as a new turn at the end. Only reports of `subagent: true` commands, which have no call row, still render as their own `TimelineNotice` turn, and only when the child started inside the loaded history; any other report (a call not loaded yet, an unknown child) stays out of the chat and is reachable from the session's subagent list, so loading older history never makes the chat shift.
 - The result of a session the agent dispatched with `returnResult` arrives as a `synthetic` message with `source: "openchamber-session"` (`@/lib/opencode/dispatched-session`, delivered by the server's `lib/dispatch-results`). It is a background report like a subagent run (`isBackgroundReportEntry`): it opens a turn, so the woken agent's reply renders below it, and a fork after an answer cuts before it. `TimelineNotice` renders it as one collapsed row, `Session finished: <title>` (failed / stopped variants carry the status icon), that opens to the answer as Markdown with an `Open session` action going through `openSessionLink`.
-- A session notice is a labelled message OpenCode, a plugin or OpenChamber puts into a session: a `synthetic` message with a `description`, or the `system` message OpenCode writes when the session's instructions change. `@/lib/opencode/session-notices` decides which ones the timeline shows (plugin notices, a restart, a `!command` that could not start, a move to another folder), and its header lists every kind, shown and hidden, with the reason; change that list there when a kind turns out to be noise. The rest about the session's instructions (skills, MCP servers, instruction files, "Loaded AGENTS.md") stays hidden as noise. The live `session.instructions.updated` event gets the `instructionSources` metadata OpenCode stores, so a live move reads like one loaded from history. A shown notice draws through `SessionNoticeBlock` as one folded row with an info icon (a `!command` that could not start takes the error icon) that opens to the text the model received. A pull request wake is one line that opens the pull request and does not expand, since its text only repeats the line. An extension wait's wake is titled by the wait and opens to the extension's report (`summary` in the message metadata), which can run longer than the description's first line. `attachSyntheticContext` places it: a notice that lands while a step runs becomes a row of that step, the final step included after it answers (the notice came before the step's `time.completed`) and also when a prompt was queued behind the running step; one that lands before the run's first step joins that step, and until the step exists turn projection keeps it in the prompt's turn (`TurnRecord.waitingNotices`, drawn by `TurnItem`), so it shows even when the run fails or is stopped before its first token and the turn stays the live tail. The row is a tool part only OpenChamber makes (`SESSION_NOTICE_TOOL`) that records whether it sits before or after the step's own parts, so Activity counts and trims it with the step's other rows and `MessageBody` draws it as a notice; `streamingTailEntry` puts these rows back before or after the step's live parts, and a turn whose only row is a notice gets no Activity fold (`hasLiveActivity`). A notice after an answer stays its own entry between turns; when a step follows, the last such notice opens that step's turn, as a hidden one did before, and a notice the answer took moves out of it to open that turn.
+- A session notice is a labelled message OpenCode, a plugin or OpenChamber puts into a session: a `synthetic` message with a `description`, or the `system` message OpenCode writes when the session's instructions change. `@/lib/opencode/session-notices` decides which ones the timeline shows (plugin notices, a restart, a `!command` that could not start, a move to another folder), and its header lists every kind, shown and hidden, with the reason; change that list there when a kind turns out to be noise. The rest about the session's instructions (skills, MCP servers, instruction files, "Loaded AGENTS.md") stays hidden as noise. The live `session.instructions.updated` event gets the `instructionSources` metadata OpenCode stores, so a live move reads like one loaded from history. A shown notice draws through `SessionNoticeBlock` as one folded row with an info icon (a `!command` that could not start takes the error icon) that opens to the text the model received. A pull request wake is one line that opens the pull request and does not expand, since its text only repeats the line. An extension wait's wake is titled by the wait and opens to the extension's report (`summary` in the message metadata), which can run longer than the description's first line. The answer to a page an agent showed with `answerLater` is titled by the page and the user's choice and opens to the data the page sent (or the parser's errors for a page that could not be drawn); the row reads the JSON line inside the envelope, because the prose around it is instructions to the agent, and a declined page is one line that does not expand. `attachSyntheticContext` places it: a notice that lands while a step runs becomes a row of that step, the final step included after it answers (the notice came before the step's `time.completed`) and also when a prompt was queued behind the running step; one that lands before the run's first step joins that step, and until the step exists turn projection keeps it in the prompt's turn (`TurnRecord.waitingNotices`, drawn by `TurnItem`), so it shows even when the run fails or is stopped before its first token and the turn stays the live tail. The row is a tool part only OpenChamber makes (`SESSION_NOTICE_TOOL`) that records whether it sits before or after the step's own parts, so Activity counts and trims it with the step's other rows and `MessageBody` draws it as a notice; `streamingTailEntry` puts these rows back before or after the step's live parts, and a turn whose only row is a notice gets no Activity fold (`hasLiveActivity`). A notice after an answer stays its own entry between turns; when a step follows, the last such notice opens that step's turn, as a hidden one did before, and a notice the answer took moves out of it to open that turn.
 - Reasoning streaming presentation derives from the live stream phase (`streaming`/`cooldown`), never from missing persisted timing: a cached part without `time.end` is not live, and a part whose `time.end` is set never streams (issue #2020).
 - Text that draws nothing takes no space (#5215). `lib/invisibleText.ts` supplies the shared test for whitespace and Unicode default-ignorable characters. Part renderers and turn projection use it for whole parts. `MarkdownArrivalBlock` omits an invisible-only streaming block before creating its wrapper; `remarkVisibleBlocks` in `streamdownPlugins.ts` filters top-level source ranges after disclosure reconstruction, including static rendering which bypasses that wrapper. Its source view omits the leading BOM as the parser does, so node offsets still identify the intended text. Both checks use the complete source block, so code fences and joiners inside visible text remain intact. The shared predicate avoids divergent definitions of empty text; CSS `:empty` cannot detect zero-width characters.
 - Assistant text parts carry the same part-finalization gate (`assistantTextVisibility.ts`): the block-level reveal (`lib/streamTextCommit.ts`) holds a still-growing part's unfinished block, and the reply takes new text at most every 400 ms, while a part sealed with `time.end` renders in full immediately — including while the turn stays blocked on a pending question or permission ask (#3277).

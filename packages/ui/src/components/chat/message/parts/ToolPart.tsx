@@ -10,7 +10,7 @@ import { MessageFilesDisplay } from '../../FileAttachment';
 import { getToolMetadata } from '@/lib/toolHelpers';
 import type { FilePart, Metadata, Part, ToolInput, ToolPart as ToolPartType, ToolState as ToolStateUnion } from '@/lib/opencode/model';
 import { toolDisplayStyles } from '@/lib/typography';
-import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
+import { HighlightedCode } from '@/components/code/HighlightedCode';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectorySync, useSessionMessages } from '@/sync/sync-context';
@@ -124,7 +124,7 @@ import { Field, QuietAction } from './ToolResultParts';
 import { openApplyPatchFileInEditor } from './applyPatchEditorAction';
 import { WebSearchResults } from './WebSearchResults';
 import { TodoWriteList } from './TodoWriteList';
-import { toBackgroundShellPart, type BackgroundShellPhase } from './backgroundShellPart';
+import { toBackgroundShellPart, toInterruptedShellPart, type BackgroundShellPhase } from './backgroundShellPart';
 import { toBackgroundSubagentPart, toStoppedSubagentPart, type BackgroundSubagentPhase } from './backgroundSubagentPart';
 import { findSubagentCancellation, findSubagentRun, readBackgroundSubagentChildID } from '@/lib/opencode/subagent-run';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
@@ -814,7 +814,7 @@ const JsonToolOutput: React.FC<{
             {jsonViewMode === 'summary' ? (
                 textOutput !== null ? (
                     <div className="typography-code pe-12 text-muted-foreground">
-                        <WorkerHighlightedCode
+                        <HighlightedCode
                             language="text"
                             code={textOutput}
                             style={TOOL_COLLAPSED_CUSTOM_STYLE}
@@ -833,7 +833,7 @@ const JsonToolOutput: React.FC<{
                 />
             ) : (
                 <div className="typography-code pe-12 text-muted-foreground">
-                    <WorkerHighlightedCode
+                    <HighlightedCode
                         language="json"
                         code={renderedOutput}
                         style={TOOL_COLLAPSED_CUSTOM_STYLE}
@@ -856,7 +856,7 @@ const CommandOutput: React.FC<{ output: string; language: string }> = ({ output,
             <CopyToolOutputButton output={output} />
         </div>
         <div className="pe-8">
-            <WorkerHighlightedCode
+            <HighlightedCode
                 language={language}
                 code={output}
                 style={TOOL_COLLAPSED_CUSTOM_STYLE}
@@ -917,7 +917,7 @@ const ToolScrollableTextOutput: React.FC<{
 
     if (forcedMode === 'text' || forcedMode === 'code') {
         return (
-            <WorkerHighlightedCode
+            <HighlightedCode
                 language={forcedMode === 'code' && presentation?.language ? presentation.language : 'text'}
                 code={renderedOutput}
                 style={TOOL_COLLAPSED_CUSTOM_STYLE}
@@ -935,7 +935,7 @@ const ToolScrollableTextOutput: React.FC<{
 
     return (
         <div>
-            <WorkerHighlightedCode
+            <HighlightedCode
                 language={outputLanguage}
                 code={renderedOutput}
                 style={TOOL_COLLAPSED_CUSTOM_STYLE}
@@ -1671,7 +1671,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                     {isExecute ? (
                         <div className="space-y-2">
                             {executeCode ? renderScrollableBlock(
-                                <WorkerHighlightedCode
+                                <HighlightedCode
                                     language="javascript"
                                     code={executeCode}
                                     style={TOOL_COLLAPSED_CUSTOM_STYLE}
@@ -2489,11 +2489,13 @@ const ShellToolPartContent: React.FC<ToolPartProps> = (props) => {
     const running = useRunningShell(shellID);
     const stopping = useForegroundShellStopping(shellID);
     const liveOutput = useShellOutput(shellID ?? '', running?.directory, shellID !== undefined && props.isExpanded);
+    const interrupted = props.part.state.status === 'error' && props.part.state.metadata?.interrupted === true;
     const part = React.useMemo((): ToolPartType => {
         const { state } = props.part;
+        if (interrupted) return toInterruptedShellPart(props.part, t('chat.toolPart.background.stoppedNotice'));
         if (!liveOutput || state.status !== 'running') return props.part;
         return { ...props.part, state: { ...state, metadata: { ...state.metadata, output: liveOutput } } };
-    }, [liveOutput, props.part]);
+    }, [interrupted, liveOutput, props.part, t]);
 
     // Stopped through the background (see `foregroundShellStop.ts`). The
     // index's `background` flag is not checked: a list read sets it for a
@@ -2509,9 +2511,11 @@ const ShellToolPartContent: React.FC<ToolPartProps> = (props) => {
         });
     }, [directory, props.part.sessionID, running, t]);
 
-    const header: ToolRowHeader | undefined = running && !stopping
-        ? { stop: { onStop: stop, ariaLabel: t('chat.toolPart.background.stop') } }
-        : undefined;
+    const header: ToolRowHeader | undefined = interrupted
+        ? { label: 'stopped' }
+        : running && !stopping
+            ? { stop: { onStop: stop, ariaLabel: t('chat.toolPart.background.stop') } }
+            : undefined;
 
     return <ToolPartContent {...props} part={part} header={header} />;
 };
