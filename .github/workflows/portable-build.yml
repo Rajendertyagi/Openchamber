@@ -76,7 +76,7 @@ jobs:
         shell: bash
         run: |
           bun run build:web-assets & pid_web=$!
-          (bun run prepare:opencode-cli && bun run verify:opencode-cli) & pid_cli=$!
+          (bun run prepare:opencode-server && bun run verify:opencode-server) & pid_cli=$!   # FIXED: -cli renamed to -server upstream
           bun run prepare:ripgrep & pid_rg=$!
           bun run bundle:main & pid_bundle=$!
 
@@ -98,7 +98,7 @@ jobs:
         shell: bash
         run: |
           node ./scripts/package.mjs --dir --${{ env.PLATFORM }} --${{ env.ARCH }} --publish=never
-          bun run verify:opencode-cli:packaged
+          bun run verify:opencode-server:packaged   # FIXED: -cli renamed to -server upstream
 
       - name: Force close running build binaries
         shell: pwsh
