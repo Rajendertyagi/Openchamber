@@ -392,10 +392,13 @@ through `getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', …)` with
 the scoped URL token; the server streams byte ranges so playback can seek.
 Images keep the object-URL/data-URL path.
 
-On Capacitor with active proxy headers and on any runtime in relay mode,
-`useRawAssetUrl` reads PDF, audio, video and fonts through `runtimeFetch` into
-an object URL: the browser cannot attach those headers to a URL it loads, and
-such a URL never enters the relay tunnel. Reads retain at
+On Capacitor with active proxy headers, in the Android app connected to a
+plain-http server, and on any runtime in relay mode, `useRawAssetUrl` reads
+PDF, audio, video and fonts through `runtimeFetch` into an object URL: the
+browser cannot attach those headers to a URL it loads, the Android WebView
+blocks an `http:` media address from its `https://localhost` page as mixed
+content, and such a URL never enters the relay tunnel. The same test
+(`runtimeAssetsNeedFetch`) sends chat images through `runtimeFetch`. Reads retain at
 most the existing 10 MiB file-open limit and have a 30-second deadline. A
 file, revision or runtime change aborts the old read and revokes its URL;
 unmount does the same. Failed reads show the existing error without falling
@@ -421,6 +424,16 @@ only authenticates to OpenChamber. Reading through the shared HTTP transport
 keeps proxy credentials out of URLs and preserves redirect refusal. The
 existing file-open limit bounds retained bytes, at the cost of waiting for
 the file to finish downloading before playback starts.
+
+### Why the Android app fetches media only from a plain-http server
+
+`android.allowMixedContent` lets `fetch` and WebSockets reach a LAN server
+over `http:`, but the WebView still blocks an image or audio/video address
+there from the `https://localhost` page. The test asks exactly that: an
+`https:` page and an `http:` runtime base. Fetching on every Capacitor runtime
+would also buffer media for the iOS app (`capacitor://` page) and for `https`
+servers, where the WebView loads the address itself and playback streams
+byte ranges past the 10 MiB file-open limit.
 
 ### Why the URL is held and not rebuilt with every new token
 
@@ -817,6 +830,17 @@ taken after the overlay has torn itself down; a browser cannot photograph a
 frame, so on web the annotation goes without one. A reload or another file
 ends a running session.
 
+### Why storage in memory and not `allow-same-origin`
+
+Without an origin, merely reading `localStorage`, `sessionStorage` or
+`document.cookie` throws, and a page whose first script does so stays blank.
+Every sandboxed page (this preview, VS Code's `srcDoc`, chat pages, shared
+pages) gets a script ahead of its own that puts in-memory storage and an empty
+cookie in place of what throws. The data lives until the page reloads. A UTF-16
+page the server serves goes out unchanged, so it gets neither. Real
+storage needs an origin, and on the app's origin the page could reach its API
+and credentials.
+
 ### Why a bridge in the page and not a webview
 
 The browser panel annotates through a `<webview>`, which the app can script
@@ -1031,8 +1055,14 @@ one instance is mounted.
 panel keeps one FilesView that follows the selected path, so during a file
 switch the draft and the file briefly belong to different files. React to real
 edits through CodeMirror transactions (`isUserEvent('input' | 'delete' | 'undo'
-| 'redo' | 'move')`). Autosave refuses to write an empty draft over a non-empty
-file (`shouldScheduleFileAutosave`); an explicit save still can.
+| 'redo' | 'move')`). Autosave (`shouldScheduleFileAutosave`) writes only a
+file whose read has finished and matches the selection: `fileLoading` is false
+and `loadedFilePath` equals the selected path. A failed read never sets
+`loadedFilePath`, so the empty draft it leaves is never autosaved over the file
+(#746). Once that holds, an emptied draft autosaves like any other edit. A
+refusal of every empty draft over a non-empty file was rejected: the load check
+already covers the empty draft a bad read leaves, so that refusal only blocked
+users who cleared a loaded file on purpose (#7414).
 
 Canvas edits never enter the text draft. A separate `canvasDirty` flag feeds
 the shared `isDirty`, so autosave, Cmd/Ctrl+S, the unsaved-changes prompt,

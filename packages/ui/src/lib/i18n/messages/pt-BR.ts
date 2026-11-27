@@ -15,7 +15,7 @@ import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
-import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { updateDialogCanaryI18n } from './update-dialog-canary.i18n'; import { updateIdleI18n } from './update-idle.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
@@ -25,6 +25,7 @@ import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { sessionCostI18n } from './session-cost.i18n';
 import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
@@ -66,6 +67,8 @@ import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { chatExchangeI18n } from './chat-exchange.i18n';
+import { integrateConflictI18n } from './integrate-conflict.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { subagentsI18n } from './subagents.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
@@ -116,10 +119,14 @@ export const dict: Record<I18nKey, string> = {
   'sessions.aiRename.noSmallModel': 'Precisa de um Small Model. Entre em um provedor de modelos ou escolha um em Configurações → Sessões.',
   'commitComparison.mode': 'Commit',
   'pullRequestComparison.select': 'Selecionar pull request',
+  'pullRequestComparison.searchShort': 'Pesquisar pull requests',
   'pullRequestComparison.pickAbove': 'Escolha um pull request acima',
   'pullRequestComparison.diffUnavailable': "{provider} não fornece o diff de pull requests, então não dá para mostrá-los nem percorrê-los aqui",
   'pullRequestComparison.partial': 'Não foi possível carregar alguns pull requests',
   'commitComparison.select': 'Selecionar commit',
+  'commitComparison.branchDividerSingle': 'Acima: o commit que só está em {branch}. Abaixo: já em {base}.',
+  'commitComparison.branchDividerPlural': 'Acima: {count} commits que só estão em {branch}. Abaixo: já em {base}.',
+  'commitComparison.backToList': 'Voltar aos commits',
   'commitComparison.search': 'Buscar commits...',
   'commitComparison.loadError': 'Não foi possível carregar os commits',
   'commitComparison.noCommits': 'Nenhum commit encontrado',
@@ -223,7 +230,7 @@ export const dict: Record<I18nKey, string> = {
   ...htmlRenderI18n['pt-BR'],
   ...documentToolbarI18n['pt-BR'],
   ...uiBlocksI18n['pt-BR'],
-  ...updateDialogCanaryI18n['pt-BR'],
+  ...updateDialogCanaryI18n['pt-BR'], ...updateIdleI18n['pt-BR'],
   ...aboutReleaseNotesI18n['pt-BR'],
   ...updateCheckErrorsI18n['pt-BR'],
   ...secretRequestI18n['pt-BR'],
@@ -233,6 +240,7 @@ export const dict: Record<I18nKey, string> = {
   ...usageStatsI18n['pt-BR'],
   ...webSearchI18n['pt-BR'],
   ...sessionWarmingI18n['pt-BR'],
+  ...sessionCostI18n['pt-BR'],
   ...connectionHeartbeatI18n['pt-BR'],
   ...compactionSettingsI18n['pt-BR'],
   ...heapSnapshotI18n['pt-BR'],
@@ -273,6 +281,8 @@ export const dict: Record<I18nKey, string> = {
   ...markdownOutlineI18n['pt-BR'],
   ...markdownGithubI18n['pt-BR'],
   ...autocompleteScopeI18n['pt-BR'],
+  ...chatExchangeI18n['pt-BR'],
+  ...integrateConflictI18n['pt-BR'],
   ...workflowsI18n['pt-BR'],
   ...subagentsI18n['pt-BR'],
   ...sessionReferencesI18n['pt-BR'],
@@ -432,10 +442,6 @@ export const dict: Record<I18nKey, string> = {
   "mobile.menu.update": "Atualizar",
   "mobile.menu.settings": "Configurações",
   "mobile.sessions.newChatCta": "Novo chat em {project}",
-  "mobile.sessions.dateGroup.today": "Hoje",
-  "mobile.sessions.dateGroup.yesterday": "Ontem",
-  "mobile.sessions.dateGroup.thisWeek": "Início desta semana",
-  "mobile.sessions.dateGroup.older": "Mais antigos",
   "mobile.sessions.section.worktrees": "Worktrees",
   "mobile.sessions.section.otherProjects": "Trocar de projeto",
   "mobile.sessions.section.projects": "Projetos",
@@ -711,6 +717,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.header.displayMode.minimal": "Mínimo",
   "sessions.sidebar.header.displayMode.showWork": "Mostrar em andamento",
   "sessions.sidebar.header.displayMode.showPinned": "Mostrar fixadas",
+  "sessions.sidebar.header.displayMode.showSubagents": "Mostrar sessões de subagentes",
   "sessions.sidebar.header.displayMode.detailedZoneRows": "Linhas detalhadas",
   "sessions.sidebar.header.displayMode.worktreeNameByBranch": "Nomear worktrees pelo branch",
   "sessions.sidebar.activity.pinnedTitle": "Fixadas",
@@ -739,6 +746,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.empty.noMatches.description": "Tente com outro título ou branch.",
   "sessions.sidebar.activity.chatsTitle": "Conversas",
   "sessions.sidebar.activity.chatsEmpty": "Ainda não há conversas.",
+  "sessions.sidebar.timeline.noSessionsYet": "Ainda sem sessões",
   "chat.chatInput.chooseProject": "Escolher projeto",
   "sessions.sidebar.header.projectDisplay.label": "Exibir projetos",
   "sessions.sidebar.header.projectDisplay.all": "Todos os projetos",
@@ -882,6 +890,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.status.movingToWorktree": "Movendo a sessão para um novo worktree",
   "sessions.sidebar.session.status.permissionRequired": "Permissão obrigatória",
   "sessions.sidebar.session.status.questionPending": "Pergunta pendente",
+  "sessions.sidebar.session.status.permissionRequiredOpen": "Permissão obrigatória. Abre a sessão que está pedindo",
+  "sessions.sidebar.session.status.questionPendingOpen": "Pergunta pendente. Abre a sessão que está pedindo",
   "sessions.sidebar.session.status.activeFor": "Ativa há {duration}",
   "sessions.sidebar.session.status.lastTurnDuration": "O último turno levou {duration}",
   "sessions.sidebar.session.subsessions.collapse": "Recolher subsessões",
@@ -1591,6 +1601,7 @@ export const dict: Record<I18nKey, string> = {
   "walkthrough.blocked.emptyDiff.description": "Ainda não há mudanças neste escopo.",
   "walkthrough.blocked.contextTooSmall.title": "Este diff é grande demais para o modelo atual",
   "walkthrough.blocked.contextTooSmall.description": "{model} comporta cerca de {available} mil caracteres e este diff precisa de cerca de {required} mil. Nada é cortado — escolha um modelo com contexto maior.",
+  "walkthrough.blocked.contextTooSmall.descriptionRefused": "{model} recusou este diff porque ele é longo demais. Escolha um modelo com contexto maior ou revise um escopo menor.",
   "walkthrough.blocked.structuredOutput.title": "Este modelo não produz saída estruturada",
   "walkthrough.blocked.structuredOutput.description": "{model} não suporta as respostas estruturadas que um percurso exige.",
   "walkthrough.blocked.chooseModel": "Escolha o modelo pequeno",
@@ -1667,6 +1678,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.browser.annotate.intro": "Esta é uma seleção anotada do navegador integrado.",
   "contextPanel.browser.annotate.attached": "Anotação anexada ao chat",
   "contextPanel.browser.annotate.noSession": "Abra uma sessão de chat antes de anexar uma anotação",
+  "contextPanel.browser.annotate.readOnly": "Este chat é somente leitura, então não é possível anexar anotações a ele",
   "contextPanel.browser.annotate.noPage": "Carregue uma página antes de anotar",
   "contextPanel.browser.annotate.failed": "Não foi possível anotar esta página",
   "contextPanel.browser.annotate.tool.element": "Elemento",
@@ -1954,6 +1966,8 @@ export const dict: Record<I18nKey, string> = {
   "diffView.state.loadingDiff": "Carregando diff...",
   "diffView.state.loadingChanges": "Carregando alterações...",
   "diffView.state.largeDiff": "Diff grande ({count} linhas alteradas)",
+  "diffView.state.largeDiffLongLines": "Diff grande (linhas muito longas)",
+  "diffView.state.largeFile": "Arquivo grande",
   "diffView.state.largeDiffDescription": "A renderização pode ser lenta. Você ainda pode ver o diff pelo botão abaixo.",
   "diffView.summary.changedFilesSingle": "{count} arquivo modificado",
   "diffView.summary.changedFilesPlural": "{count} arquivos modificados",
@@ -1978,6 +1992,10 @@ export const dict: Record<I18nKey, string> = {
   "diffView.layout.sideBySide": "Visualização lado a lado",
   "diffView.actions.wrapLines": "Quebra de linha",
   "diffView.actions.moreActions": "Mais ações",
+  "diffView.actions.viewOptions": "Opções de visualização do diff",
+  "gitView.sidebar.resizeAria": "Redimensionar a barra lateral do Git",
+  "gitView.commit.stagedCountSummary": "{count} em stage",
+  "gitView.commit.collapseAria": "Recolher formulário de commit",
   "diffView.actions.openFileInEditorAtChange": "Abrir este arquivo no editor nesta alteração",
   "diffView.actions.openFileAtFirstChangedLine": "Abrir este arquivo na primeira linha alterada",
   'diffView.actions.reviewAria': 'Revisar alterações',
@@ -2385,6 +2403,9 @@ export const dict: Record<I18nKey, string> = {
   "session.githubPrPicker.empty.noPullRequestsFound": "Nenhuma PR encontrada",
   "session.githubPrPicker.loading.pullRequests": "Carregando PR...",
   "session.githubPrPicker.actions.loadMore": "Carregar mais",
+  "session.githubPrPicker.filter.group.repository": "Repositório",
+  "session.githubPrPicker.filter.group.author": "Autor",
+  "session.githubPrPicker.filter.clearAll": "Limpar filtros",
   "session.newWorktree.title": "Novo worktree",
   "session.newWorktree.mode.newBranch": "Nova branch",
   "session.newWorktree.mode.existingBranch": "Branch existente",
@@ -2527,6 +2548,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.revert.toast.undo": "Revertido para {preview}",
   "chat.revert.toast.redo": "Refeito",
   "chat.revert.toast.restored": "Todas as mensagens restauradas",
+  "chat.revert.toast.filesUnchanged": "Chat revertido. Os arquivos não foram alterados.",
   "chat.toast.opencodeRestartInterrupted.title": "Conversa interrompida",
   "chat.toast.opencodeRestartInterrupted.description": "O OpenCode foi reiniciado enquanto uma resposta ainda estava em andamento. Envie uma mensagem para continuar.",
   "chat.toast.opencodeRestartInterrupted.autoResumeDescription": "O OpenCode foi reiniciado enquanto uma resposta ainda estava em andamento. O chat será retomado automaticamente; envie uma mensagem se não for.",
@@ -2659,6 +2681,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.textSelection.title.saveInsightToNotes": "Salvar texto selecionado em notas",
   "chat.messageBody.actions.revertAria": "Voltar para esta mensagem",
   "chat.messageBody.actions.revert": "Voltar daqui",
+  "chat.messageBody.status.waitingForAgent": "Aguardando o agente",
   "chat.messageBody.actions.forkAria": "Bifurcar a partir desta mensagem",
   "chat.messageBody.actions.fork": "Bifurcar daqui",
   "chat.messageBody.actions.copyMessageAria": "Copiar texto da mensagem",
@@ -2747,6 +2770,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.toast.sendAttachmentsFailed": "Não foi possível enviar os anexos. Tente com menos arquivos ou imagens menores.",
   "chat.chatInput.toast.messageSendFailed": "A mensagem não pôde ser enviada. Os anexos foram restaurados.",
   "chat.chatInput.toast.agentUnavailable": "O agente \"{agent}\" não está disponível na pasta desta sessão. Escolha outro agente e envie novamente.",
+  "chat.chatInput.toast.skillLoadFailed": "A habilidade \"{skill}\" não carregou do servidor MCP dela. Verifique nas Configurações se o servidor está conectado e envie novamente.",
   "chat.chatInput.toast.noModelSelected": "Selecione um provedor e um modelo antes de enviar.",
   "chat.chatInput.toast.clipboardAttachFailed": "Não foi possível anexar a imagem da área de transferência",
   "chat.chatInput.toast.clipboardTextAttachFailed": "Não foi possível anexar o texto colado como arquivo",
@@ -3098,6 +3122,11 @@ export const dict: Record<I18nKey, string> = {
   "openInApp.actions.copyPath": "Copiar caminho",
   "openInApp.actions.refreshApps": "Atualizar aplicativos",
   "openInApp.toast.pathCopied": "Caminho copiado para a área de transferência",
+  "openInApp.toast.sshOpenFailed": "Não foi possível abrir o {app}. Verifique se ele está instalado neste computador.",
+  "openInApp.toast.sshInstanceChanged": "Esta janela mudou para outra instância antes de o {app} abrir. Tente novamente.",
+  "openInApp.toast.sshSettingsMismatch": "O {app} não se conectaria como esta instância: o comando SSH dela define {settings}, que o {app} não lê. Mova essas configurações para a entrada do host em ~/.ssh/config.",
+  "openInApp.toast.sshUnresolved": "Não foi possível ler as configurações SSH desta instância, então o {app} não foi aberto. Verifique o comando SSH dela.",
+  "openInApp.toast.sshUnsupported": "O {app} não consegue abrir este projeto via SSH.",
   "projectActions.actions.addActionAria": "Adicionar ação",
   "projectActions.actions.addAction": "Adicionar ação",
   "projectActions.actions.addNewAction": "Adicionar nova ação",
